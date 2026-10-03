@@ -195,13 +195,13 @@ ClkService:
                 or      a
                 sbc     hl,de
                 ret     nz                      ; the front window is not one
-                call    WndIsFront
+                call    ApiWndIsFront
                 ret     nz
-                call    PtrRestore
+                call    ApiPtrRestore
                 call    ClkDraw
-                call    WinGrab
-                call    PtrSaveBg
-                jp      PtrDraw
+                call    ApiWinGrab
+                call    ApiPtrSaveBg
+                jp      ApiPtrDraw
 
 ; ------------------------------------------------------------
 ;  ClkDraw
@@ -228,7 +228,7 @@ ClkDraw:
                 ld      hl,ClkText
                 xor     a
                 ld      (PrintInv),a
-                call    PrintStrPx2
+                call    ApiPrint
                 ; and the selected field over the top of itself
                 ld      a,(ClkField)
                 ld      b,a
@@ -250,7 +250,7 @@ ClkDraw:
                 ld      hl,ClkPair
                 ld      a,1
                 ld      (PrintInv),a
-                call    PrintStrPx2
+                call    ApiPrint
                 xor     a
                 ld      (PrintInv),a
                 ret
@@ -307,11 +307,11 @@ CkNotU:
                 ld      c,0
                 call    ClkAdjust
 CkPaint:
-                call    PtrRestore
+                call    ApiPtrRestore
                 call    ClkDraw
-                call    WinGrab
-                call    PtrSaveBg
-                jp      PtrDraw
+                call    ApiWinGrab
+                call    ApiPtrSaveBg
+                jp      ApiPtrDraw
 
 ; C = 1 up, 0 down. Wraps within the field rather than carrying into
 ; the next one: setting the minutes should not move the hour under

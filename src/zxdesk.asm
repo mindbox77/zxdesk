@@ -82,9 +82,12 @@ SLOWTOP         equ     $8000
                 org     32768
 
 ; ------------------------------------------------------------
-;  Entry
+;  Entry. Main is slot 0 of the table in api.inc.
 ; ------------------------------------------------------------
 Main:
+                jp      Start
+                include "api.inc"
+Start:
 IFDEF BENCH
                 jp      BenchMain       ; bench build only, emits nothing otherwise
 ENDIF

@@ -299,6 +299,7 @@ def main():
 
     failures += blit_checks(m)
     failures += field_checks(m)
+    failures += api_checks(m)
 
     m.call("BStoreTest")
     print(f"BStoreTest   wrote {m.peek16(m.sym('BStWrote'))}, "
@@ -349,6 +350,63 @@ def main():
         return 1
     print("all headless subjects pass")
     return 0
+
+
+def api_checks(m):
+    """Slot n is at $8000 + 3n. The order is fixed; append only."""
+    failures = []
+    base = 0x8000
+    slots = [
+        ("Main", "Start"),
+        ("ApiVersion", "ApiVerGet"),
+        ("ApiWndOpen", "WndOpen"),
+        ("ApiWndClose", "WndClose"),
+        ("ApiWndIsFront", "WndIsFront"),
+        ("ApiWndRepaint", "WndRepaintAll"),
+        ("ApiWndBar", "WndScrollBar"),
+        ("ApiWinGrab", "WinGrab"),
+        ("ApiPrint", "PrintStrPx2"),
+        ("ApiPrintClip", "WinPrintClip"),
+        ("ApiFillRect", "DevFillRect"),
+        ("ApiAddrAt", "AddrAt"),
+        ("ApiPtrRestore", "PtrRestore"),
+        ("ApiPtrSaveBg", "PtrSaveBg"),
+        ("ApiPtrDraw", "PtrDraw"),
+        ("ApiAlloc", "HeapAlloc"),
+        ("ApiFree", "HeapFree"),
+        ("ApiFreeOwner", "HeapFreeOwner"),
+        ("ApiEvPost", "EvPost"),
+        ("ApiStSelect", "StSelect"),
+        ("ApiStOpen", "StOpen"),
+        ("ApiStClose", "StClose"),
+        ("ApiStRead", "StRead"),
+        ("ApiStWrite", "StWrite"),
+        ("ApiStDir", "StDir"),
+        ("ApiStDelete", "StDelete"),
+        ("ApiStCaps", "StCaps"),
+        ("ApiStIdent", "StIdent"),
+    ]
+    bad = []
+    for n, (slot, target) in enumerate(slots):
+        at = base + 3 * n
+        if (m.sym(slot) != at or m.peek(at) != 0xC3
+                or m.peek16(at + 1) != m.sym(target)):
+            bad.append(slot)
+    m.call("ApiVersion")
+    ver, count = m.m.a, m.m.b
+    print("application interface:")
+    if bad:
+        failures.append("api slots: " + ", ".join(bad))
+    else:
+        print(f"  {len(slots)} slots from ${base:04X}, each a jump to the "
+              f"routine it names")
+    if (ver, count) != (m.sym("API_VER"), len(slots)):
+        failures.append(f"ApiVersion said version {ver}, {count} slots")
+    else:
+        print(f"  slot 1 reports version {ver} and {count} slots")
+    if m.sym("ApiEnd") != base + 3 * len(slots):
+        failures.append("the table does not end where the list does")
+    return failures
 
 
 def paint_checks(m):
