@@ -342,6 +342,13 @@ either side of the change.
 | 16×96 rectangle fill | 17,414 T | 22,068 T | +48 T a row |
 | 16×96 desktop fill | 25,351 T | 30,125 T | +50 T a row |
 
+Both fills have since learned to cope with an odd width, which used to
+leave its third column unpainted. An even width pays one untaken jump
+for that, 7 T a call. That figure is derived, not measured: the jump
+sits above `$8000` and runs before anything touches the screen. The
+fill timings in this section and in the contention sweep were taken
+before the change, so they're 7 T low per call.
+
 That's a real cost, and it's worth it. The drag path is mostly the
 column fill, which writes through HL, never touched SP and was never at
 risk.
