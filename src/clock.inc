@@ -219,16 +219,9 @@ ClkDraw:
                 ld      a,(ClkM)
                 call    ClkPut2
                 ld      (hl),0
-                call    ApiWinRec
-                ld      c,(hl)                  ; X
-                inc     c
-                inc     hl
-                ld      a,(hl)                  ; Y
-                add     a,WinCapH+4
-                ld      b,a
-                ld      (ClkPos),bc             ; C = column, B = row
+                ld      bc,CLKROW*256           ; row CLKROW, column 0
                 ld      hl,ClkText
-                call    ApiPrintAt
+                call    ApiWinPrint
                 ; and the selected field over the top of itself
                 ld      a,(ClkField)
                 ld      b,a
@@ -243,13 +236,10 @@ ClkDraw:
                 inc     hl
                 ld      a,(hl)
                 ld      (ClkPair+1),a
-                ld      bc,(ClkPos)
-                ld      a,c
-                add     a,e
-                ld      c,a
-                ld      a,b
+                ld      c,e
+                ld      b,CLKROW
                 ld      hl,ClkPair
-                jp      ApiPrintInvAt
+                jp      ApiWinPrintInv
 
 ; A = a value below 100, HL = where its two digits go, and HL is left
 ; after them.
@@ -353,7 +343,7 @@ CkaSet:
 
 ClkText:        defs    6
 ClkPair:        defb    0,0,0
-ClkPos:         defw    0               ; column, row of the text
+CLKROW          equ     4               ; rows below the title bar
 
 ClkH:           defb    12
 ClkM:           defb    0

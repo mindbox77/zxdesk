@@ -387,8 +387,10 @@ def api_checks(m):
         ("ApiStIdent", "StIdent"),
         # version 2
         ("ApiWinRec", "WinRecGet"),
-        ("ApiPrintAt", "PrintAt"),
-        ("ApiPrintInvAt", "PrintInvAt"),
+        ("ApiWinPrint", "WinPrint"),
+        ("ApiWinPrintInv", "WinPrintInv"),
+        ("ApiWinClear", "WinClear"),
+        ("ApiWinAddr", "WinAddr"),
     ]
     bad = []
     for n, (slot, target) in enumerate(slots):

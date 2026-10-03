@@ -332,9 +332,7 @@ CalCent:
                 ld      c,0                     ; of the digit it had just
                 call    CalPut2                 ; printed
                 ld      (hl),0
-                ld      a,(WinY)
-                add     a,WinCapH+3
-                ld      (PxRow),a
+                ld      b,3
                 call    CalPrint
 
                 ; the weekday letters
@@ -344,9 +342,7 @@ CalCent:
                 ldir                            ; The other way round wrote the
                                                 ; header over the labels and
                                                 ; printed the header twice
-                ld      a,(WinY)
-                add     a,WinCapH+12
-                ld      (PxRow),a
+                ld      b,12
                 call    CalPrint
 
                 ; and six weeks
@@ -358,11 +354,8 @@ CalWeek:
                 add     a,a
                 add     a,a
                 add     a,a                     ; eight pixel rows a week
+                add     a,21
                 ld      b,a
-                ld      a,(WinY)
-                add     a,WinCapH+21
-                add     a,b
-                ld      (PxRow),a
                 call    CalPrint
                 ld      hl,CalIx
                 inc     (hl)
@@ -450,18 +443,14 @@ CalP2Put:
                 inc     hl
                 ret
 
-; CalRow at PxRow, one column in from the window's left edge.
+; CalRow at row B of the window, in the first column.
 CalPrint:
-                ld      a,(WinX)
-                inc     a
-                ld      c,a
+                ld      c,0
                 ld      hl,CalRow
-                xor     a
-                ld      (PrintInv),a
-                jp      WinPrintClip
+                jp      ApiWinPrint
 
-; The cell for day A of the month on show: leaves PxRow set and
-; returns C = its byte column. The caller has already made sure the
+; The cell for day A of the month on show: returns B = its row and
+; C = its column, both relative to the window. The caller has already made sure the
 ; day is in this month.
 CalCellAt:
                 dec     a
@@ -472,20 +461,14 @@ CalCellAt:
                 add     a,a
                 add     a,a
                 add     a,a
-                ld      b,a
-                ld      a,(WinY)
-                add     a,WinCapH+21
-                add     a,b
-                ld      (PxRow),a
+                add     a,21
+                ld      d,a
                 ld      a,(CalRem)
                 ld      b,a
                 add     a,a
                 add     a,b                     ; three columns to a cell
-                ld      b,a
-                ld      a,(WinX)
-                inc     a
-                add     a,b
                 ld      c,a
+                ld      b,d
                 ret
 
 ; The selected day, printed again inverted. In a one bit display
@@ -504,12 +487,7 @@ CalSelDraw:
                 ld      (hl),0
                 pop     bc
                 ld      hl,CalPair
-                ld      a,1
-                ld      (PrintInv),a
-                call    WinPrintClip
-                xor     a
-                ld      (PrintInv),a
-                ret
+                jp      ApiWinPrintInv
 
 CalToday:
                 ld      a,(TodayY)
@@ -522,11 +500,10 @@ CalToday:
                 ret     nz
                 ld      a,(TodayD)
                 call    CalCellAt
-                ld      a,(PxRow)
-                add     a,7                     ; the last row of the glyph,
-                                                ; so the rule touches the
-                                                ; digits rather than floating
-                call    AddrAt
+                ld      a,b
+                add     a,7                     ; the last row of the glyph
+                ld      b,a
+                call    ApiWinAddr
                 ld      (hl),$FF
                 inc     hl
                 ld      (hl),$FF
@@ -591,35 +568,16 @@ CkyNotD:
                 ld      a,(CalSel)
                 ld      (TodayD),a
 CkyPaint:
-                call    PtrRestore
-                call    CalClearBody
+                call    ApiPtrRestore
+                call    ApiWinClear
                 call    CalDraw
-                call    WndScrollBar            ; it has no bar, so this is a
+                call    ApiWndBar               ; it has no bar, so this is a
                                                 ; compare and a return, and it
                                                 ; is here so the rule is the
                                                 ; same in every application
-                call    WinGrab
-                call    PtrSaveBg
-                jp      PtrDraw
-
-; The grid area, blanked. A month with five weeks follows one with
-; six, and the sixth row of the old month would otherwise stay.
-CalClearBody:
-                ld      a,(WinX)
-                inc     a
-                ld      (FrX),a
-                ld      a,(WinY)
-                add     a,WinCapH+1
-                ld      (FrY),a
-                ld      a,(WinW)
-                sub     2
-                ld      (FrW),a
-                ld      a,(WinH)
-                sub     WinCapH+3
-                ld      (FrH),a
-                ld      hl,$0000
-                ld      (FrPat),hl
-                jp      DevFillRect
+                call    ApiWinGrab
+                call    ApiPtrSaveBg
+                jp      ApiPtrDraw
 
 CalNames:       defb    "JANFEBMARAPRMAYJUNJULAUGSEPOCTNOVDEC"
 ; Two letters a day, so the labels sit over the digits rather than

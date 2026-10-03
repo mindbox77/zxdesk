@@ -47,10 +47,13 @@ ApiStDelete:    jp      StDelete        ; 25 HL = name. Carry if it could not
 ApiStCaps:      jp      StCaps          ; 26 -> A = capability bits
 ApiStIdent:     jp      StIdent         ; 27 -> A = backend id
 
-                ; version 2: no globals needed to draw in a window
+                ; version 2: drawing relative to the live window.
+                ; B = pixel rows below the title bar, C = columns in
 ApiWinRec:      jp      WinRecGet       ; 28 -> HL = live record: X, Y, W, H
-ApiPrintAt:     jp      PrintAt         ; 29 A = row, C = column, HL = string
-ApiPrintInvAt:  jp      PrintInvAt      ; 30 the same, inverted
+ApiWinPrint:    jp      WinPrint        ; 29 B, C, HL = string. Clipped
+ApiWinPrintInv: jp      WinPrintInv     ; 30 the same, inverted
+ApiWinClear:    jp      WinClear        ; 31 blank the interior
+ApiWinAddr:     jp      WinAddr         ; 32 B, C -> HL = screen address
 ApiEnd:
 
 API_SLOTS       equ     (ApiEnd-Main)/3
@@ -64,17 +67,51 @@ WinRecGet:
                 ld      hl,WinRec
                 ret
 
-PrintAt:
-                ld      (PxRow),a
+WinPrint:
                 xor     a
                 ld      (PrintInv),a
-                jp      PrintStrPx2
-
-PrintInvAt:
+WinPrintGo:
+                ld      a,(WinY)
+                add     a,WinCapH
+                add     a,b
                 ld      (PxRow),a
+                ld      a,(WinX)
+                inc     a
+                add     a,c
+                ld      c,a
+                jp      WinPrintClip
+
+WinPrintInv:
                 ld      a,1
                 ld      (PrintInv),a
-                call    PrintStrPx2
+                call    WinPrintGo
                 xor     a
                 ld      (PrintInv),a
                 ret
+
+WinClear:
+                ld      a,(WinX)
+                inc     a
+                ld      (FrX),a
+                ld      a,(WinY)
+                add     a,WinCapH+1
+                ld      (FrY),a
+                ld      a,(WinW)
+                sub     2
+                ld      (FrW),a
+                ld      a,(WinH)
+                sub     WinCapH+3
+                ld      (FrH),a
+                ld      hl,0
+                ld      (FrPat),hl
+                jp      DevFillRect
+
+WinAddr:
+                ld      a,(WinX)
+                inc     a
+                add     a,c
+                ld      c,a
+                ld      a,(WinY)
+                add     a,WinCapH
+                add     a,b
+                jp      AddrAt
