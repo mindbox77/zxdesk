@@ -1137,8 +1137,8 @@ RiBtn:
 
 ; ------------------------------------------------------------
 ;  DevFillRect
-;  in: FrX byte column, FrY pixel row, FrW width in bytes
-;      (even), FrH rows, FrPat 16 bit pattern
+;  in: FrX byte column, FrY pixel row, FrW width in bytes,
+;      FrH rows, FrPat 16 bit pattern
 ;  Fills using the stack, entering an unrolled PUSH chain at
 ;  the right offset so no inner loop counter is paid for.
 ;  Requires FrX + FrW <= 32.
@@ -1180,12 +1180,51 @@ RiBtn:
 ;  return address, so two bytes is the whole exposure and it
 ;  cannot nest.
 ; ------------------------------------------------------------
+; An odd width. The chain writes pairs and missed the third column,
+; so paint the first column through HL and give the chain the rest.
+FrOdd:
+                ld      a,(FrX)
+                ld      c,a
+                ld      a,(FrY)
+                call    AddrAt
+                ld      a,(FrH)
+                ld      b,a
+                ld      a,(FrPat)
+                ld      c,a
+FrOddCol:
+                ld      (hl),c
+                call    ScrDown
+                djnz    FrOddCol
+                ld      hl,FrW
+                dec     (hl)
+                jr      z,FrOddDone             ; one column wide
+                ld      hl,FrX
+                inc     (hl)
+                call    FrSwapPat               ; keeps the pattern's phase
+                call    DevFillRect
+                call    FrSwapPat
+                ld      hl,FrX
+                dec     (hl)
+FrOddDone:
+                ld      hl,FrW
+                inc     (hl)
+                ret
+
+FrSwapPat:
+                ld      hl,(FrPat)
+                ld      a,h
+                ld      h,l
+                ld      l,a
+                ld      (FrPat),hl
+                ret
+
 DevFillRect:
                 ld      a,(FrH)
                 or      a
                 ret     z
                 ld      a,(FrW)
                 srl     a
+                jr      c,FrOdd
                 ret     z
                 ld      (FrWHalf),a
                 dec     a               ; one push shorter than the row
@@ -1299,12 +1338,53 @@ FrPatH2         equ     $-1
 ;  is harmless, and it puts every instruction of the bookkeeping
 ;  inside the stretch where SP is parked in the pad.
 ; ------------------------------------------------------------
+; An odd width, as FrOdd. The first column takes the lattice a row
+; at a time and the chain takes the rest.
+FdOdd:
+                ld      a,(FrX)
+                ld      c,a
+                ld      a,(FrY)
+                call    AddrAt
+                ld      a,(FrH)
+                ld      b,a
+                ld      a,(FrY)
+                ld      c,a
+FdOddCol:
+                ld      a,c
+                rrca
+                jr      c,FdOddBlank
+                rrca
+                ld      a,(LatA1)
+                jr      nc,FdOddSet
+                ld      a,(LatB1)
+                jr      FdOddSet
+FdOddBlank:
+                xor     a
+FdOddSet:
+                ld      (hl),a
+                call    ScrDown
+                inc     c
+                djnz    FdOddCol
+                ld      hl,FrW
+                dec     (hl)
+                jr      z,FdOddDone
+                ld      hl,FrX
+                inc     (hl)
+                call    DevFillDesk
+                ld      hl,FrX
+                dec     (hl)
+FdOddDone:
+                ld      hl,FrW
+                inc     (hl)
+                ret
+
 DevFillDesk:
                 ld      a,(FrH)
                 or      a
                 ret     z
                 ld      a,(FrW)
                 srl     a
+                jr      c,FdOdd
                 ret     z
                 dec     a               ; one push shorter than the row
                 ld      hl,FdPushChainEnd
