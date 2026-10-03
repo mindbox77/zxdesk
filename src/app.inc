@@ -77,7 +77,8 @@ AppNote:        defw    NOTESTSZ, NoteState, NoteInit, NoteDrawInterior
                 ; the kind used to say: it drops what is typed at it.
 AppAbout:       defw    0, 0, 0, WdAbout
                 defw    0, TxtAboutTitle
-                defb    16, 92, 13, 52
+                defb    14, 92, 15, 52  ; 11 characters and a clear
+                                        ; column each side
                 defw    0                       ; nothing to lose, so nothing
                                                 ; to ask
                 defw    0, 0
