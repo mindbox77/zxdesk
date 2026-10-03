@@ -53,7 +53,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-open -a Fuse "$TAP"
+# A tape passed at a cold launch is not loaded by Fuse 1.10.0, so
+# start Fuse first and open the tape once its window is up.
+open -a Fuse
 
 BOUNDS=""
 for i in {1..30}; do
@@ -64,6 +66,9 @@ if [[ -z "$BOUNDS" ]]; then
   echo "Fuse came up with no window after 30s. Check the screen for a dialog." >&2
   exit 1
 fi
+
+sleep 2
+open -a Fuse "$TAP"
 
 sleep "$SETTLE"
 
