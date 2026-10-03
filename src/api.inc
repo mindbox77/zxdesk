@@ -4,7 +4,7 @@
 ;  Slot 0 is the cold start. Order is append only.
 ;  API_VER goes up when a slot is added.
 ; ============================================================
-API_VER         equ     1
+API_VER         equ     2
 
                 ; slot 0 is Main, in zxdesk.asm
 ApiVersion:     jp      ApiVerGet       ; 1  out: A = API_VER, B = slots
@@ -46,6 +46,11 @@ ApiStDir:       jp      StDir           ; 24 A = n -> HL = name, DE = length
 ApiStDelete:    jp      StDelete        ; 25 HL = name. Carry if it could not
 ApiStCaps:      jp      StCaps          ; 26 -> A = capability bits
 ApiStIdent:     jp      StIdent         ; 27 -> A = backend id
+
+                ; version 2: no globals needed to draw in a window
+ApiWinRec:      jp      WinRecGet       ; 28 -> HL = live record: X, Y, W, H
+ApiPrintAt:     jp      PrintAt         ; 29 A = row, C = column, HL = string
+ApiPrintInvAt:  jp      PrintInvAt      ; 30 the same, inverted
 ApiEnd:
 
 API_SLOTS       equ     (ApiEnd-Main)/3
@@ -53,4 +58,23 @@ API_SLOTS       equ     (ApiEnd-Main)/3
 ApiVerGet:
                 ld      a,API_VER
                 ld      b,API_SLOTS
+                ret
+
+WinRecGet:
+                ld      hl,WinRec
+                ret
+
+PrintAt:
+                ld      (PxRow),a
+                xor     a
+                ld      (PrintInv),a
+                jp      PrintStrPx2
+
+PrintInvAt:
+                ld      (PxRow),a
+                ld      a,1
+                ld      (PrintInv),a
+                call    PrintStrPx2
+                xor     a
+                ld      (PrintInv),a
                 ret

@@ -385,6 +385,10 @@ def api_checks(m):
         ("ApiStDelete", "StDelete"),
         ("ApiStCaps", "StCaps"),
         ("ApiStIdent", "StIdent"),
+        # version 2
+        ("ApiWinRec", "WinRecGet"),
+        ("ApiPrintAt", "PrintAt"),
+        ("ApiPrintInvAt", "PrintInvAt"),
     ]
     bad = []
     for n, (slot, target) in enumerate(slots):
@@ -404,6 +408,11 @@ def api_checks(m):
         failures.append(f"ApiVersion said version {ver}, {count} slots")
     else:
         print(f"  slot 1 reports version {ver} and {count} slots")
+    m.call("ApiWinRec")
+    if m.m.hl != m.sym("WinRec"):
+        failures.append("ApiWinRec did not return the live record")
+    else:
+        print("  slot 28 returns the live window record")
     if m.sym("ApiEnd") != base + 3 * len(slots):
         failures.append("the table does not end where the list does")
     return failures
