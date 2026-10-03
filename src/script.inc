@@ -17,7 +17,7 @@ ScriptStep:
                 ret     nz
                 ld      a,(ScrRep)
                 or      a
-                jr      nz,SsSame
+                jr      nz,ScrSame
                 ld      hl,(ScrPtr)
                 ld      a,(hl)
                 or      a
@@ -34,7 +34,7 @@ ScriptStep:
                 ld      (ScrY),a
                 inc     hl
                 ld      (ScrPtr),hl
-SsSame:
+ScrSame:
                 ld      a,(ScrRep)
                 dec     a
                 ld      (ScrRep),a
