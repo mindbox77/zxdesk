@@ -393,7 +393,7 @@ CmdRepaint:
                 ld      a,(CmdWasK)
                 call    StSelect
                 call    PtrRestore
-                call    CmdClearBody
+                call    ApiWinClear
                 call    CmdDraw
                 call    WndScrollBar            ; the interior was repainted
                                                 ; without WinDraw, so the
@@ -401,23 +401,6 @@ CmdRepaint:
                 call    WinGrab
                 call    PtrSaveBg
                 jp      PtrDraw
-
-CmdClearBody:
-                ld      a,(WinX)
-                inc     a
-                ld      (FrX),a
-                ld      a,(WinY)
-                add     a,WinCapH
-                ld      (FrY),a
-                ld      a,(WinW)
-                sub     2
-                ld      (FrW),a
-                ld      a,(WinH)
-                sub     WinCapH+2
-                ld      (FrH),a
-                ld      hl,$0000
-                ld      (FrPat),hl
-                jp      DevFillRect
 
 ; ------------------------------------------------------------
 ;  The selected file's name, into CmdWork

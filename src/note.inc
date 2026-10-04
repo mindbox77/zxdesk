@@ -837,7 +837,7 @@ NkpAll:
                 ; The interior is cleared first. A join and a scroll both
                 ; leave fewer lines than were there, and painting the new
                 ; ones over the old leaves the difference on screen.
-                call    NoteClearBody
+                call    ApiWinClear
                 call    NoteDrawAll
 NkpNoText:
                 ld      a,1
@@ -845,33 +845,9 @@ NkpNoText:
                 call    NoteCurDraw
                 ; The bar is chrome and WinDraw normally paints it, but this
                 ; repaints the interior without going through WinDraw and
-                ; NoteClearBody has just wiped it. An application that
+                ; the clear has just wiped it. An application that
                 ; repaints its own interior owes the frame its chrome back.
                 jp      WndScrollBar
-
-; Blank the text area of the window, which is everything below the cap
-; and inside the border. DevFillRect works in byte columns and pixel
-; rows, which is what the window model already speaks.
-NoteClearBody:
-                ld      a,(WinX)
-                inc     a
-                ld      (FrX),a
-                ld      a,(WinY)
-                add     a,NOTETOP
-                ld      (FrY),a
-                ld      a,(WinW)
-                sub     2                       ; inside both borders, and
-                ld      (FrW),a                 ; still even for a window of
-                                                ; even width, which is what
-                                                ; DevFillRect halves
-                call    NoteVisRows
-                add     a,a
-                add     a,a
-                add     a,a                     ; the rows it shows, times 8
-                ld      (FrH),a
-                ld      hl,$0000                ; white
-                ld      (FrPat),hl
-                jp      DevFillRect
 
 ; ------------------------------------------------------------
 ;  Keeping the window buffer honest
@@ -1098,7 +1074,7 @@ NstTop:
                 ; and then the bottom was no longer reachable.
 NstPaint:
                 call    PtrRestore
-                call    NoteClearBody
+                call    ApiWinClear
                 call    NoteDrawAll
                 call    NoteCurDraw
                 call    WndScrollBar
