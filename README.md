@@ -11,7 +11,7 @@ state frame.
 
 It runs on the real thing, not just an emulator.
 
-![The desktop](images/zxdesk-desktop.png)
+![The desktop, with the commander, the clock and a loaded app](images/zxdesk-hero.png)
 
 ---
 
@@ -63,6 +63,8 @@ Screenshots:
 | Two windows, z ordered | The notepad, with the Sinclair style shift-reporting cursor |
 | ![Commander](images/zxdesk-commander.png) | ![Clock and calendar](images/zxdesk-clock-calendar.png) |
 | Two pane commander, over devices rather than directories | Clock and calendar |
+| ![A loaded app](images/zxdesk-counter.png) | ![The FILE menu](images/zxdesk-file-menu.png) |
+| The counter example, loaded from a file and running in a window | The FILE menu, with LOAD for app files |
 
 ---
 
@@ -720,6 +722,7 @@ build it blind on an emulator, so it waits until one arrives.
     src/filemgr.inc             the file panels
     src/loader.inc              loads an app file into the heap and runs it
     src/settings.inc            the settings record
+    src/setdata.inc             the part of it the frame reads
     src/script.inc              scripted input, for end to end verification
     images/                     the screenshots above
 
