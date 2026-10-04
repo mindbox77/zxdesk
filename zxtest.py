@@ -3353,6 +3353,14 @@ def loader_checks():
     else:
         print("  FILE, LOAD with the name typed runs it")
     m4.call("FmLoadPanel")
+    for k in [4, 4, 4, 13]:                 # down to EXIT
+        m4.m.a = k
+        m4.call("PnlKey")
+    if m4.peek(m4.sym("FmUp")) or m4.peek(m4.sym("DgDepth")):
+        failures.append("EXIT does not close the LOAD APP panel")
+    else:
+        print("  EXIT closes the panel and loads nothing")
+    m4.call("FmLoadPanel")
     for k in list("NOPE") + [4, 4, 13]:
         m4.m.a = k if isinstance(k, int) else ord(k)
         m4.call("PnlKey")

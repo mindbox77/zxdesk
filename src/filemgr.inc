@@ -292,7 +292,7 @@ FmsSeeded:
 FmLoadPanel:
                 ld      hl,FmLoadRows
                 ld      de,TxtFmLoadTitle
-                ld      a,4
+                ld      a,5
                 call    FmNameSetup
                 xor     a
                 ld      (FmField),a
@@ -371,6 +371,11 @@ FmLoadRows:
                 defb    0
                 defw    0
 
+                defb    PT_ACTION
+                defw    TxtFmExit, FmClose
+                defb    0
+                defw    0
+
 NmFmFrom:       defw    TxtFmDisk, TxtFmTape
 FmFrom:         defb    0
 TxtFmLoadTitle: defb    "LOAD APP",0
@@ -378,6 +383,7 @@ TxtFmFrom:      defb    "FROM",0
 TxtFmDisk:      defb    "DISK",0
 TxtFmTape:      defb    "TAPE",0
 TxtFmLoad:      defb    "LOAD",0
+TxtFmExit:      defb    "EXIT",0
 TxtFmNoLoad:    defb    "COULD NOT LOAD",0
 
 FmDoSave:
