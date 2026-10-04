@@ -2434,7 +2434,12 @@ CloseBox:       defb    $FF,$81,$BD,$BD,$BD,$BD,$81,$FF
 ; ------------------------------------------------------------
                 include "saveunder.inc"
 
+; The bench build is short of fast region, so its settings code
+; goes in the slow one. None of it runs inside a frame.
+IFNDEF BENCH
                 include "settings.inc"
+ENDIF
+                include "setdata.inc"
 
                 include "menus.inc"
 
@@ -4033,6 +4038,10 @@ SlowStart:
                 include "dialog.inc"
 
                 include "calendar.inc"
+
+IFDEF BENCH
+                include "settings.inc"
+ENDIF
 
                 include "filemgr.inc"
 

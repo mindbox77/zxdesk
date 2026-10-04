@@ -172,18 +172,6 @@ SetaLatSet:
 ; diagonal rather than in columns.
 LatDots:        defb    $88, $22
 
-AccelPtr:       defw    AccelTabs+ACCELLEN
-
 SetName:        defb    "SETTINGS",0
 SetHandle:      defb    0
 SetGot:         defw    0
-
-SetRec:
-                defb    SETMAGIC
-                defb    SETVERSION
-SetSpeed:       defb    1
-SetInvertY:     defb    1
-SetLattice:     defb    1
-SetKeyPtr:      defb    1
-SetSound:       defb    1
-                defb    0
