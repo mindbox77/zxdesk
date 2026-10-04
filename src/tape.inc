@@ -121,6 +121,14 @@ TapnCopy:
 ; data block into the buffer. Carry set means the tape ran out or
 ; the block was corrupt.
 TapeLoad:
+IFNDEF BENCH
+                ; The ROM waits on a silent tape for ever, with the desktop
+                ; stopped. Say how to end it before it starts.
+                ld      hl,TxtTapeWait
+                ld      b,STATROW
+                ld      c,0
+                call    PrintStr
+ENDIF
                 ld      iy,SYSVARS              ; the ROM indexes through IY
                 di
                 ld      a,TAPETRIES
@@ -326,6 +334,9 @@ ELSE
 TAPETRIES       equ     32
 ENDIF
 
+IFNDEF BENCH
+TxtTapeWait:    defb    "READING TAPE. SPACE TO STOP.    ",0
+ENDIF
 TapeAny:        defb    0
 TapeTries:      defb    0
 TapeFound:      defs    11

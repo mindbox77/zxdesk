@@ -170,9 +170,9 @@ tables.
 
 ### The memory map
 
-    $6000-$7E58   the slow region: storage, panels, the calendar, the
+    $6000-$7E83   the slow region: storage, panels, the calendar, the
                   file panels, the desktop setup, the commander
-    $7E59-$7FFF   free, 423 bytes, contended
+    $7E84-$7FFF   free, 380 bytes, contended
     $8000-$B6E3   the fast region: everything else, starting with
                   the application interface's jump table
     $B6E4-$BCFF   free, 1,564 bytes
