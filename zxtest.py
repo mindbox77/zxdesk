@@ -343,6 +343,7 @@ def main():
         failures += filemgr_checks()
         failures += dialog_checks()
         failures += loader_checks()
+        failures += tape_import_checks()
     else:
         print("no 48K ROM found, skipping the paint checks")
 
@@ -1661,13 +1662,13 @@ def commander_checks():
     if left != ("RAM", ["NOTE", "DRAFT", "LETTER"]):
         failures.append("the left pane does not list the RAM device")
         print(f"  left is {left}")
-    elif right != ("TAPE", ["NO DIR"]):
-        failures.append("the tape pane does not say it has no directory")
+    elif right != ("TAPE", ["R NEXT"]):
+        failures.append("the tape pane does not say how to read from it")
         print(f"  right is {right}")
     else:
-        print(f"  left {left[0]} lists {left[1]}, right {right[0]} says "
-              f"{right[1][0]}, which is STCAP_DIR answering rather than an "
-              f"error path")
+        print(f"  left {left[0]} lists {left[1]}, right {right[0]} has no "
+              f"listing and says which keys read from it, which is "
+              f"STCAP_DIR answering rather than an error path")
 
     # walking a pane, and changing which pane
     for _ in range(2):
@@ -3374,6 +3375,198 @@ COUNTER_V3 = (
     "IXcAAQMEzVeAIYMAAQEOw1eANi80kTD8gSPJ/gMoCv4EKAz+DcCvGAo6dgA8GAQ6dgA9MnYA"
     "zSSAzV2AzRsAzRWAzSeAwyqAADAwMABDT1VOVEVSAFVQIERPV04AAgAEAAYACAAKABgAHAAf"
     "ACQAKQAvADgAWABeAGIAawA=")
+
+
+def call_tape(m, name, tape, limit=80_000_000):
+    """Machine.call with a tape trap at LD_BYTES, the way emulators do it.
+
+    `tape` is a list of (flag, bytes) blocks and is consumed. A block is
+    delivered when its flag and length are the ones asked for; otherwise
+    it is passed over and the load fails, as it would on a real signal.
+    """
+    LD = 0x0556
+    was = m.peek(LD)
+    m.poke(LD, 0x76)
+    m.poke(SENTINEL, 0x76)
+    m.m.sp = STACK - 2
+    m.poke16(m.m.sp, SENTINEL)
+    m.m.pc = m.syms[name]
+    ticks = 0
+    try:
+        while ticks < limit:
+            ticks += m.m.run()
+            if not m.m.halted:
+                continue
+            m.m.halted = False
+            if m.m.pc in (LD, LD + 1):
+                ok = False
+                if tape:
+                    flag, data = tape.pop(0)
+                    if flag == m.m.a and len(data) == m.m.de:
+                        for i, x in enumerate(data):
+                            m.poke(m.m.ix + i, x)
+                        ok = True
+                m.m.f = (m.m.f | 1) if ok else (m.m.f & 0xFE)
+                m.m.pc = m.peek16(m.m.sp)
+                m.m.sp = (m.m.sp + 2) & 0xFFFF
+                continue
+            if m.m.pc in (SENTINEL, SENTINEL + 1):
+                return
+            raise RuntimeError(f"{name} halted at {m.m.pc:04X}")
+        raise RuntimeError(f"{name} did not return")
+    finally:
+        m.poke(LD, was)
+
+
+def tape_blocks(name, data):
+    head = (bytes([3]) + name.upper().ljust(10)[:10].encode("ascii")
+            + len(data).to_bytes(2, "little") + bytes([0, 0, 0, 0x80]))
+    return [(0x00, head), (0xFF, bytes(data))]
+
+
+def tape_import_checks():
+    """Reading apps in from tape so the commander can list them.
+
+    A tape has no directory, so its files are imported into a device
+    that has one. The tape itself is a trap at LD_BYTES fed from a list
+    of blocks, which is what an emulator's tape trap does.
+    """
+    import mkapp
+    failures = []
+    print("importing from tape:")
+    apps = {n: mkapp.build(f"examples/{n}/{n}.asm")
+            for n in ("counter", "stopwatch", "tally")}
+
+    def tape(*names):
+        out = []
+        for n in names:
+            out += tape_blocks({"stopwatch": "WATCH"}.get(n, n), apps[n])
+        return out
+
+    def files(m):
+        out = []
+        for i in range(8):
+            m.m.a = i
+            m.call("StDir")
+            if m.m.f & 1:
+                break
+            at, name = m.m.hl, ""
+            while m.peek(at):
+                name += chr(m.peek(at))
+                at += 1
+            out.append((name, m.m.de))
+        return out
+
+    def key(m, k, t):
+        m.m.b = m.sym(k) if len(k) > 1 else ord(k)
+        call_tape(m, "HdlKey", t)
+
+    def shown(m, col, count):
+        x = m.peek(m.sym("WinX")) + 1 + col
+        y = m.peek(m.sym("WinY")) + m.sym("WinCapH") + 4
+        return "".join(next((ch for ch in "0123456789:"
+                             if m.font_glyph(ch) == m.glyph_at(x + i, y)), "?")
+                       for i in range(count))
+
+    def commander(banked=False):
+        m = Machine("build/zxdesk.bin", "build/zxdesk.sym", banked=banked)
+        for rt in ("DetectMachine", "SetupIM2", "BuildScrTab", "MouseInit",
+                   "JoyInit", "StInit", "SetLoad", "SetApply", "DskInit",
+                   "InitScreen", "WndInit", "WinDraw", "WinGrab", "PtrSaveBg",
+                   "PtrDraw"):
+            m.call(rt)
+        m.m.a = m.sym("APP_CMD")
+        m.call("WndOpen")
+        return m
+
+    # R: one file, and then it is an ordinary file
+    m = commander()
+    t = tape("stopwatch", "counter")
+    key(m, "R", t)
+    got = files(m)
+    if got != [("WATCH", len(apps["stopwatch"]))] or len(t) != 2:
+        failures.append("R did not import the next file from the tape")
+        print(f"  {got}, {len(t)} blocks left")
+    else:
+        print(f"  R reads the next file into the other pane: {got}")
+    key(m, "KEY_ENTER", t)
+    if (m.peek16(m.sym("WinApp")) != m.sym("AppExt")
+            or shown(m, 2, 5) != "00:00"):
+        failures.append("the imported app does not run from the listing")
+    else:
+        print("  ENTER on it in the listing runs it")
+
+    # A: all of them, stopping when the tape comes round
+    m = commander()
+    t = tape("counter", "stopwatch", "counter", "stopwatch")
+    key(m, "A", t)
+    got = [n for n, _ in files(m)]
+    if got != ["COUNTER", "WATCH"] or len(t) != 2:
+        failures.append("A did not import each file once")
+        print(f"  {got}, {len(t)} blocks left")
+    else:
+        print(f"  A reads them all and stops when the first comes round "
+              f"again: {got}")
+
+    # an empty tape ends rather than hanging, and so does SPACE
+    m = commander()
+    key(m, "A", [])
+    tries = m.peek(m.sym("TapeTries"))
+    m.keys[0x7F] = 0xFE
+    key(m, "R", [])
+    held = m.peek(m.sym("TapeTries"))
+    m.keys.pop(0x7F)
+    if files(m) or tries != 0 or held != m.sym("TAPETRIES") - 1:
+        failures.append("a tape with nothing on it is not given up on")
+        print(f"  tries left {tries}, with SPACE held {held}")
+    else:
+        print(f"  a silent tape is given up on after {m.sym('TAPETRIES') - 1} "
+              f"tries, and at once with SPACE held")
+
+    # too big for the device: refused whole, with an alert
+    m = commander()
+    key(m, "A", tape("counter", "tally", "stopwatch"))
+    got = [n for n, _ in files(m)]
+    if got != ["COUNTER"] or not m.peek(m.sym("DgDepth")):
+        failures.append("a file too big for the device was not refused")
+        print(f"  {got}, alert depth {m.peek(m.sym('DgDepth'))}")
+    else:
+        print("  the tally is too big for a 48K RAM file: an alert, and no "
+              "half file left behind")
+
+    # a 128K takes all three, and the big one arrives whole
+    m = commander(banked=True)
+    key(m, "A", tape("counter", "tally", "stopwatch"))
+    got = files(m)
+    want = [("COUNTER", len(apps["counter"])), ("TALLY", len(apps["tally"])),
+            ("WATCH", len(apps["stopwatch"]))]
+    if got != want:
+        failures.append("the 128K did not import all three whole")
+        print(f"  {got}")
+    else:
+        key(m, "KEY_DOWN", [])
+        key(m, "KEY_ENTER", [])
+        if shown(m, 3, 3) != "000":
+            failures.append("the imported tally does not run")
+        else:
+            print("  a 128K imports all three to the bank device, 279 "
+                  "bytes in two chunks, and the tally runs")
+
+    # a named load now gets past another file on the way
+    m = commander()
+    m.call("WndClose")
+    m.call("FmLoadPanel")
+    for k in list("COUNTER") + [4, 13, 4, 13]:
+        m.m.a = k if isinstance(k, int) else ord(k)
+        call_tape(m, "PnlKey", t2 := tape("stopwatch", "counter")) \
+            if k == 13 and m.peek(m.sym("PnlFocus")) == 3 else m.call("PnlKey")
+    if (m.peek16(m.sym("WinApp")) != m.sym("AppExt")
+            or shown(m, 3, 3) != "000"):
+        failures.append("FILE, LOAD from tape did not pass over a file")
+    else:
+        print("  FILE, LOAD by name from tape passes over the file in "
+              "front of it")
+    return failures
 
 
 def watchdog_checks():

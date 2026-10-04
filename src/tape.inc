@@ -38,12 +38,15 @@ TapeInit:
                 ld      (TapePos),hl
                 xor     a
                 ld      (TapeDirty),a
+                ld      (TapeFound),a
                 ret
 
 ; HL = name, B = mode. One file at a time, handle is always 1.
 TapeOpen:
                 ld      a,b
                 ld      (TapeMode),a
+                ld      a,(hl)                  ; the empty name means the
+                ld      (TapeAny),a             ; next file, whatever it is
                 call    TapeName                ; pad the name into the header
                 call    TapeInit
                 ld      a,(TapeMode)
@@ -96,13 +99,37 @@ TapnCopy:
 TapeLoad:
                 ld      iy,SYSVARS              ; the ROM indexes through IY
                 di
+                ld      a,TAPETRIES
+                ld      (TapeTries),a
 TaplSeek:
+                ld      hl,TapeTries
+                dec     (hl)
+                jr      z,TaplFail
                 ld      ix,TapeIn
                 ld      de,TAPEHDR
                 xor     a                       ; $00: a header block
                 scf                             ; load rather than verify
                 call    LD_BYTES
+                jr      c,TaplHdr
+                ld      a,$7F                   ; not a header. SPACE gives
+                in      a,($FE)                 ; up; anything else was a
+                rra                             ; block to pass over
                 jr      nc,TaplFail
+                jr      TaplSeek
+TaplHdr:
+                ld      a,(TapeAny)
+                or      a
+                jr      nz,TaplNamed
+                ld      a,(TapeIn)
+                cp      3
+                jr      nz,TaplSeek             ; only CODE files are ours
+                ld      hl,(TapeIn+11)
+                ld      de,TAPEMAX
+                or      a
+                sbc     hl,de
+                jr      nc,TaplSeek             ; too long to hold: pass it
+                jr      TaplTake
+TaplNamed:
                 ld      hl,TapeHdr+1
                 ld      de,TapeIn+1
                 ld      b,10
@@ -118,6 +145,7 @@ TaplCmp:
                 or      a
                 sbc     hl,de
                 jr      nc,TaplFail             ; longer than the buffer
+TaplTake:
                 ld      hl,(TapeIn+11)
                 ld      (TapeLen),hl
                 ex      de,hl
@@ -126,6 +154,21 @@ TaplCmp:
                 scf
                 call    LD_BYTES
                 jr      nc,TaplFail
+                ; the name it had, without the padding, for TapeDirEnt
+                ld      hl,TapeIn+1
+                ld      de,TapeFound
+                ld      bc,10
+                ldir
+                ex      de,hl
+                ld      b,9
+TaplTrim:
+                ld      (hl),0
+                dec     hl
+                ld      a,(hl)
+                cp      ' '
+                jr      nz,TaplOk
+                djnz    TaplTrim
+TaplOk:
                 ei
                 or      a
                 ret
@@ -239,6 +282,29 @@ TapeClose:
                 or      a
                 ret
 
+; A = n. The one name a tape can give: the file it last read.
+TapeDirEnt:
+                or      a
+                jp      nz,StNoDir
+                ld      a,(TapeFound)
+                or      a
+                jp      z,StNoDir
+                ld      de,(TapeLen)
+                ld      hl,TapeFound
+                ret
+
+; Blocks to pass before giving up. The bench wants the answer at
+; once: its tape has nothing after the program and a silent tape
+; is waited on for ever.
+IFDEF BENCH
+TAPETRIES       equ     2
+ELSE
+TAPETRIES       equ     32
+ENDIF
+
+TapeAny:        defb    0
+TapeTries:      defb    0
+TapeFound:      defs    11
 TapeMode:       defb    0
 TapeLen:        defw    0
 TapePos:        defw    0

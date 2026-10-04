@@ -48,7 +48,7 @@ a lot of evenings. They're yours.
 | **Menus** | A permanent menu bar with pull downs, save under, and hit testing. |
 | **Input** | Kempston mouse, Kempston joystick, and the full keyboard matrix decoded across three tables with repeat. All of it arrives as events. |
 | **Events** | A sixteen slot ring. The main loop contains no window specific code. |
-| **Storage** | A registry of backends behind six vectors. RAM, tape (via the real ROM loader), and the 128K's spare banks as a RAM disk. [esxDOS](https://esxdos.org/) has a reserved id. |
+| **Storage** | A registry of backends behind six vectors. RAM, tape (via the real ROM loader), and the 128K's spare banks as a RAM disk. The commander imports files from tape into either. [esxDOS](https://esxdos.org/) has a reserved id. |
 | **Memory** | A real heap with an owner byte, 8,111 bytes, allocating window buffers sized to their windows. |
 | **Applications** | A descriptor with init, event and paint, plus per instance state swapped in and out. Notepad, clock, calendar, commander, about. |
 | **Application interface** | A jump table at `$8000`, 45 slots, with slot n at `$8000 + 3n`. The clock, the calendar, the notepad and the commander all work through it and name no desktop global. |
@@ -170,13 +170,12 @@ tables.
 
 ### The memory map
 
-    $6000-$7EA0   the slow region: panels, the calendar, the file
-                  panels, the desktop setup, the commander, the
-                  app loader
-    $7EA1-$7FFF   free, 351 bytes, contended
-    $8000-$B4FD   the fast region: everything else, starting with
+    $6000-$7E2C   the slow region: storage, panels, the calendar, the
+                  file panels, the desktop setup, the commander
+    $7E2D-$7FFF   free, 467 bytes, contended
+    $8000-$B6E3   the fast region: everything else, starting with
                   the application interface's jump table
-    $B4FE-$BCFF   free, 2,050 bytes
+    $B6E4-$BCFF   free, 1,564 bytes
     $BD00         stack top
     $BDBD         interrupt handler
     $BE00-$BEFF   interrupt vector table
@@ -595,6 +594,13 @@ image, after the desktop, so FILE, LOAD with FROM set to TAPE finds it.
 In the commander, ENTER on an app file runs it and ENTER on anything
 else still opens it in a notepad.
 
+A tape has no directory, so the commander imports from it instead. With
+a tape pane showing, R reads the next file on the tape into the other
+pane's device and A reads them all, stopping when the first name comes
+round again, the tape runs out or SPACE is held. After that they are
+ordinary files in the listing. A file too big for the device is refused
+whole, with an alert.
+
 There are three examples, each the whole of a working app:
 
 | | | |
@@ -689,11 +695,11 @@ Unless a row says otherwise, assume every register is changed.
 | 17 | `ApiFreeOwner` | A = owner | Frees every block with that owner |
 | 18 | `ApiEvPost` | A = event type, B, C = its arguments | Carry if the queue was full |
 | 19 | `ApiStSelect` | A = an `ST_` device | Carry if there is no such device |
-| 20 | `ApiStOpen` | HL = name, B = `FA_READ` or `FA_OVERWRITE` | A = handle. Carry if it could not |
+| 20 | `ApiStOpen` | HL = name, B = `FA_READ` or `FA_OVERWRITE` | A = handle. Carry if it could not. On tape, the empty name reads the next file |
 | 21 | `ApiStClose` | A = handle | |
 | 22 | `ApiStRead` | A = handle, HL = buffer, BC = count | BC = bytes read |
 | 23 | `ApiStWrite` | A = handle, HL = buffer, BC = count | BC = bytes written |
-| 24 | `ApiStDir` | A = n, from nought | HL = name of the nth file, DE = its length. Carry if none |
+| 24 | `ApiStDir` | A = n, from nought | HL = name of the nth file, DE = its length. Carry if none. On tape, n = 0 is the file last read |
 | 25 | `ApiStDelete` | HL = name | Carry if it could not |
 | 26 | `ApiStCaps` | | A = `STCAP_` bits of the current device |
 | 27 | `ApiStIdent` | | A = the current `ST_` device |
@@ -715,7 +721,7 @@ Unless a row says otherwise, assume every register is changed.
 | 43 | `ApiWinFill` | Window relative, D = rows, E = columns, HL = pattern | Fills. The caller keeps it inside the window |
 | 44 | `ApiWinRefresh` | | Repaints the front window through its `Draw` |
 
-One file is open at a time, on every device. A string ends in a nought
+One file is open at a time on each device. A string ends in a nought
 byte. Slot 0 is the desktop's own entry point.
 
 ---

@@ -371,6 +371,22 @@ CmkNotR:
                 jr      nz,CmkNotEnt
                 jp      CmdOpen
 CmkNotEnt:
+IFNDEF NOEXTRAS
+                cp      'R'
+                jr      nz,CmkNotRd
+                xor     a
+                jr      CmkImp
+CmkNotRd:
+                cp      'A'
+                jr      nz,CmkNotAll
+                ld      a,1
+CmkImp:
+                call    CmdImport
+                jr      nc,CmdRepaint
+                ld      a,(CmdWasK)             ; an alert is up: leave it
+                jp      ApiStSelect
+CmkNotAll:
+ENDIF
                 cp      'C'
                 jr      nz,CmkNotC
                 call    CmdCopy
@@ -406,6 +422,8 @@ CmdPicked:
                 ld      a,(hl)
                 call    ApiStDir
                 ret     c
+; HL = a name, copied into CmdWork
+CmdNameCopy:
                 ld      de,CmdWork
                 ld      b,12
 CmpkCopy:
@@ -505,12 +523,130 @@ CmdDelete:
                 ld      (hl),a
                 ret
 
+IFNDEF NOEXTRAS
+; ------------------------------------------------------------
+;  CmdImport
+;  in:  A = 0 for the next file on the tape, 1 for all of them
+;  out: carry if an alert is up
+;  From the tape pane into the other pane's device. A tape has
+;  no directory, so this is how its files get one. All stops
+;  when the first name comes round again, the tape runs out, or
+;  SPACE is held.
+; ------------------------------------------------------------
+CmdImport:
+                ld      (CmdAll),a
+                xor     a
+                ld      (CmdFirst),a
+                ld      a,(CmdBk0)
+                cp      ST_TAPE
+                ld      a,1                     ; the other pane takes them
+                jr      z,CmiGo
+                ld      a,(CmdBk1)
+                cp      ST_TAPE
+                jr      z,CmiLeft
+                or      a                       ; neither pane is the tape
+                ret
+CmiLeft:
+                xor     a
+CmiGo:
+                ld      (CmdDest),a
+CmiNext:
+                ld      a,ST_TAPE
+                call    ApiStSelect
+                ld      hl,CmdFirst+12          ; a nought: the empty name
+                ld      b,FA_READ
+                call    ApiStOpen
+                ccf
+                ret     nc                      ; nothing more to read
+                ld      (CmdHandle),a
+                xor     a
+                call    ApiStDir                ; what it was called
+                ccf
+                ret     nc
+                call    CmdNameCopy
+                ld      a,(CmdAll)
+                or      a
+                jr      z,CmiCopy
+                ld      hl,CmdFirst
+                ld      a,(hl)
+                or      a
+                jr      z,CmiRemember
+                ld      de,CmdWork
+CmiSame:
+                ld      a,(de)
+                cp      (hl)
+                jr      nz,CmiCopy
+                or      a
+                ret     z                       ; the tape has come round
+                inc     hl
+                inc     de
+                jr      CmiSame
+CmiRemember:
+                ld      hl,CmdWork
+                ld      de,CmdFirst
+                ld      bc,12
+                ldir
+CmiCopy:
+                ld      a,(CmdDest)
+                call    CmdUse
+                ld      hl,CmdWork
+                ld      b,FA_OVERWRITE
+                call    ApiStOpen
+                jr      c,CmiFull
+                ld      (CmdOut),a
+CmiChunk:
+                ld      a,ST_TAPE
+                call    ApiStSelect
+                ld      a,(CmdHandle)
+                ld      hl,CmdBuf
+                ld      bc,CMDBUFSZ
+                call    ApiStRead
+                ld      (CmdGot),bc
+                ld      a,(CmdDest)
+                call    CmdUse
+                ld      bc,(CmdGot)
+                ld      a,b
+                or      c
+                jr      z,CmiDone
+                ld      a,(CmdOut)
+                ld      hl,CmdBuf
+                call    ApiStWrite
+                ld      hl,(CmdGot)
+                or      a
+                sbc     hl,bc
+                jr      z,CmiChunk
+                ; it did not all fit, and half an app is worse than none
+                ld      a,(CmdOut)
+                call    ApiStClose
+                ld      hl,CmdWork
+                call    ApiStDelete
+CmiFull:
+                ld      hl,TxtCmdBig
+                ld      de,CmdWork
+                call    ApiDlgAlert
+                scf
+                ret
+CmiDone:
+                ld      a,(CmdOut)
+                call    ApiStClose
+                ld      a,(CmdAll)
+                or      a
+                jp      nz,CmiNext
+                ret
+
+TxtCmdBig:      defb    "DOES NOT FIT",0
+CmdAll:         defb    0
+CmdDest:        defb    0
+CmdOut:         defb    0
+CmdFirst:       defs    13
+ENDIF
+
 CMDBUFSZ        equ     256
 
 TxtCmdRam:      defb    "RAM",0
 TxtCmdTape:     defb    "TAPE",0
 TxtCmdBank:     defb    "BANK",0
-TxtCmdNoDir:    defb    "NO DIR",0
+TxtCmdNoDir:    defb    "R NEXT  A ALL",0
 TxtCmdBlank:    defb    " ",0
 
 CmdPane:        defb    0

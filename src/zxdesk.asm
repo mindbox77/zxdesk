@@ -79,6 +79,15 @@ MOUSEMAX        equ     64              ; the most a mouse may move in one frame
 SLOWORG         equ     $6000
 SLOWTOP         equ     $8000
 
+; The app loader and the tape import are left out of the bench, test
+; and esxDOS test builds, which have no room for them.
+IFDEF HARNESS
+NOEXTRAS        equ     1
+ENDIF
+IFDEF ESXTEST
+NOEXTRAS        equ     1
+ENDIF
+
                 org     32768
 
 ; ------------------------------------------------------------
@@ -2456,6 +2465,9 @@ ENDIF
 
                 include "note.inc"
 
+                ; Here rather than in the slow region only for room.
+                include "loader.inc"
+
                 include "mousetest.inc"
 
                 include "resize.inc"
@@ -4045,8 +4057,6 @@ IFDEF BENCH
 ENDIF
 
                 include "filemgr.inc"
-
-                include "loader.inc"
 
                 include "dsksetup.inc"
 

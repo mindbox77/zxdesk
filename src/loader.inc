@@ -57,7 +57,7 @@ LdnCopy:
 LdnNamed:
                 call    StIdent
                 ld      (SysOpenBk),a
-IFDEF ESXTEST
+IFDEF NOEXTRAS
                 ld      a,2                     ; no loader in this build
                 ret
 ELSE

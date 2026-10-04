@@ -105,7 +105,7 @@ StRegistry:
                 defw    RamDelete
                 defb    ST_TAPE
                 defb    STCAP_WRITE|STCAP_PERSIST
-                defw    TapeOpen, TapeClose, TapeRead, TapeWrite, StNoDir
+                defw    TapeOpen, TapeClose, TapeRead, TapeWrite, TapeDirEnt
                 defw    StNoDelete
                 defb    ST_BANK
                 defb    STCAP_WRITE|STCAP_RANDOM|STCAP_DIR
