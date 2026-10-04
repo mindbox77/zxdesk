@@ -128,6 +128,13 @@ IFNDEF BENCH
                 ld      b,STATROW
                 ld      c,0
                 call    PrintStr
+                ; ShowStatus only repaints cells that differ from what it
+                ; last drew, so tell it none of the row is its own now.
+                ld      hl,StatShown
+                ld      de,StatShown+1
+                ld      bc,SCRCOLS-1
+                ld      (hl),0
+                ldir
 ENDIF
                 ld      iy,SYSVARS              ; the ROM indexes through IY
                 di

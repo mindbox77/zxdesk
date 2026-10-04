@@ -3485,6 +3485,7 @@ def tape_import_checks():
             m.call(rt)
         m.m.a = m.sym("APP_CMD")
         m.call("WndOpen")
+        m.call("ShowStatus")                # the row as the desktop has it
         return m
 
     # R: one file, and then it is an ordinary file
@@ -3503,6 +3504,23 @@ def tape_import_checks():
         failures.append("the imported app does not run from the listing")
     else:
         print("  ENTER on it in the listing runs it")
+
+    # the status row says a read is on, and is put back whole after
+    def status():
+        return "".join(next((ch for ch in " ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                             "0123456789." if m.font_glyph(ch)
+                             == m.glyph_at(c, 184)), "?") for c in range(32))
+    said = status()
+    m.poke(m.sym("FrameCnt"), m.peek(m.sym("FrameCnt")) ^ 1)
+    m.call("ShowStatus")
+    after = status()
+    if not said.startswith("READING TAPE") or "READ" in after \
+            or "TOP" in after or not after.startswith("X "):
+        failures.append("the tape message is left on the status row")
+        print(f"  during {said!r}, after {after!r}")
+    else:
+        print(f"  the status row says so during the read and is whole "
+              f"again after: {after.strip()!r}")
 
     # A: all of them, stopping when the tape comes round
     m = commander()
