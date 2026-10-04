@@ -89,8 +89,10 @@ DlgAlert:
                 ; appears silently while you are looking at the keyboard
                 ; has not told you anything.
                 push    hl
+                push    de                      ; SndPlay uses DE
                 ld      a,SND_BEEP
                 call    SndPlay
+                pop     de
                 pop     hl
                 ld      (DgLine1),hl
                 ld      (DgLine2),de
