@@ -49,8 +49,9 @@ a lot of evenings. They're yours.
 | **Input** | Kempston mouse, Kempston joystick, and the full keyboard matrix decoded across three tables with repeat. All of it arrives as events. |
 | **Events** | A sixteen slot ring. The main loop contains no window specific code. |
 | **Storage** | A registry of backends behind six vectors. RAM, tape (via the real ROM loader), and the 128K's spare banks as a RAM disk. [esxDOS](https://esxdos.org/) has a reserved id. |
-| **Memory** | A real heap with an owner byte, 8,112 bytes, allocating window buffers sized to their windows. |
+| **Memory** | A real heap with an owner byte, 8,111 bytes, allocating window buffers sized to their windows. |
 | **Applications** | A descriptor with init, event and paint, plus per instance state swapped in and out. Notepad, clock, calendar, commander, about. |
+| **Application interface** | A jump table at `$8000`, 33 slots, with slot n at `$8000 + 3n`. The clock and the calendar already draw through it and name no desktop global. |
 | **Persistence** | Settings written to storage with a magic byte and a version, and read back at boot. |
 
 Screenshots:
@@ -166,18 +167,19 @@ tables.
 
 ### The memory map
 
-    $6000-$727C   the slow region: panels, the calendar, the file
+    $6000-$7C6F   the slow region: panels, the calendar, the file
                   panels, the desktop setup, the commander
-    $727D-$7FFF   free, 3,460 bytes, contended
-    $8000-$B1B7   the fast region: everything else
-    $B1B8-$BCFF   free, 2,889 bytes
+    $7C70-$7FFF   free, 912 bytes, contended
+    $8000-$B444   the fast region: everything else, starting with
+                  the application interface's jump table
+    $B445-$BCFF   free, 2,235 bytes
     $BD00         stack top
     $BDBD         interrupt handler
     $BE00-$BEFF   interrupt vector table
     $C000-$C63F   the RAM disk, its directory, and the tape buffer
-    $C640-$C74F   the live notepad state
-    $C750-$DF4F   four transient surfaces
-    $DF50-$FEFF   the heap, 8,112 bytes
+    $C640-$C750   the live notepad state
+    $C751-$DF50   four transient surfaces
+    $DF51-$FEFF   the heap, 8,111 bytes
     $FF00-$FFFF   deliberately unused
 
 Two things in that map are worth explaining.
@@ -197,7 +199,7 @@ The heap stops a page short of the top of memory rather than at
 `$FFFF`. Every walk computes the next block as address plus header plus
 size, and a block ending at `$10000` would wrap to nought and compare
 as below the base of the heap. Stopping at `$FF00` costs 256 bytes of
-8,272 and removes the entire class of failure.
+8,367 and removes the entire class of failure.
 
 ---
 
@@ -633,6 +635,7 @@ build it blind on an emulator, so it waits until one arrives.
     src/bank.inc                the 128K's spare banks as a RAM disk
     src/heap.inc                the heap and its owner byte
     src/app.inc                 application descriptors and the state swap
+    src/api.inc                 the application interface, a jump table at $8000
     src/resize.inc              the grip, the outline drag, the realloc
     src/note.inc                the notepad
     src/clock.inc               the clock
