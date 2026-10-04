@@ -3541,6 +3541,18 @@ def tape_import_checks():
     else:
         print("  the tally is too big for a 48K RAM file: an alert, and no "
               "half file left behind")
+        # it is still in the tape buffer, and the tape pane lists it
+        m.m.a = 13
+        m.call("PnlKey")
+        key(m, "KEY_RIGHT", [])
+        m.m.b = m.sym("KEY_ENTER")
+        m.call("HdlKey")                    # no tape trap: it must not ask
+        if (m.peek16(m.sym("WinApp")) != m.sym("AppExt")
+                or shown(m, 3, 3) != "000"):
+            failures.append("the file held in the tape buffer does not run")
+        else:
+            print("  and ENTER on it in the tape pane runs it from the "
+                  "buffer, without going back to the tape")
 
     # a 128K takes all three, and the big one arrives whole
     m = commander(banked=True)

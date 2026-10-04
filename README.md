@@ -170,9 +170,9 @@ tables.
 
 ### The memory map
 
-    $6000-$7E2C   the slow region: storage, panels, the calendar, the
+    $6000-$7E58   the slow region: storage, panels, the calendar, the
                   file panels, the desktop setup, the commander
-    $7E2D-$7FFF   free, 467 bytes, contended
+    $7E59-$7FFF   free, 423 bytes, contended
     $8000-$B6E3   the fast region: everything else, starting with
                   the application interface's jump table
     $B6E4-$BCFF   free, 1,564 bytes
@@ -599,7 +599,9 @@ a tape pane showing, R reads the next file on the tape into the other
 pane's device and A reads them all, stopping when the first name comes
 round again, the tape runs out or SPACE is held. After that they are
 ordinary files in the listing. A file too big for the device is refused
-whole, with an alert.
+whole, with an alert, but the tape pane lists the file the tape buffer
+still holds, and ENTER there runs it without going back to the tape.
+A tape that has run out is waited on, as a Spectrum does, until SPACE.
 
 There are three examples, each the whole of a working app:
 

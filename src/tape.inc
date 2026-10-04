@@ -47,6 +47,30 @@ TapeOpen:
                 ld      (TapeMode),a
                 ld      a,(hl)                  ; the empty name means the
                 ld      (TapeAny),a             ; next file, whatever it is
+                or      a
+                jr      z,TapoFresh
+                ld      a,b
+                cp      FA_READ
+                jr      nz,TapoFresh
+                ; Asked by name for the file the buffer already holds:
+                ; hand it over again rather than go back to the tape.
+                push    hl
+                ld      de,TapeFound
+TapoHeld:
+                ld      a,(de)
+                cp      (hl)
+                jr      nz,TapoNotHeld
+                inc     hl
+                inc     de
+                or      a
+                jr      nz,TapoHeld
+                pop     hl
+                ld      hl,0
+                ld      (TapePos),hl
+                jr      TapoOk
+TapoNotHeld:
+                pop     hl
+TapoFresh:
                 call    TapeName                ; pad the name into the header
                 call    TapeInit
                 ld      a,(TapeMode)
