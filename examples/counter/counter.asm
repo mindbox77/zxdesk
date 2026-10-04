@@ -14,9 +14,10 @@
                 defw    Draw            ; paint the inside of the window
                 defw    Key             ; A = a key
                 defw    Title
-                defb    10, 60          ; column, pixel row it opens at
+                defb    16, 24          ; column, pixel row it opens at
                 defb    12, 36          ; width in columns, height in rows
                 defw    0, 0, 0         ; close, scroll, scroll to: unused
+                defw    0               ; tick: unused
 
 Init:
                 xor     a
@@ -68,14 +69,7 @@ Down:
                 dec     a
 Store:
                 ld      (Count),a
-                ; Repainting: lift the pointer, draw, then tell the
-                ; desktop the window changed and put the pointer back.
-                call    ApiPtrRestore
-                call    ApiWinClear
-                call    Draw
-                call    ApiWinGrab
-                call    ApiPtrSaveBg
-                jp      ApiPtrDraw
+                jp      ApiWinRefresh   ; clears, calls Draw, shows it
 
 Count:          defb    0
 Digits:         defb    "000",0

@@ -51,8 +51,8 @@ a lot of evenings. They're yours.
 | **Storage** | A registry of backends behind six vectors. RAM, tape (via the real ROM loader), and the 128K's spare banks as a RAM disk. [esxDOS](https://esxdos.org/) has a reserved id. |
 | **Memory** | A real heap with an owner byte, 8,111 bytes, allocating window buffers sized to their windows. |
 | **Applications** | A descriptor with init, event and paint, plus per instance state swapped in and out. Notepad, clock, calendar, commander, about. |
-| **Application interface** | A jump table at `$8000`, 44 slots, with slot n at `$8000 + 3n`. The clock, the calendar, the notepad and the commander all work through it and name no desktop global. |
-| **Loadable apps** | An app is a file: a header, an image assembled at origin nought, and a relocation table. The desktop loads it into the heap from RAM, a 128K bank or tape and runs it in a window. See [Writing an app](#writing-an-app). |
+| **Application interface** | A jump table at `$8000`, 45 slots, with slot n at `$8000 + 3n`. The clock, the calendar, the notepad and the commander all work through it and name no desktop global. |
+| **Loadable apps** | An app is a file: a header, an image assembled at origin nought, and a relocation table. The desktop loads it into the heap from RAM, a 128K bank or tape and runs it in a window, three at a time, with a tick for apps that keep time. See [Writing an app](#writing-an-app). |
 | **Persistence** | Settings written to storage with a magic byte and a version, and read back at boot. |
 
 Screenshots:
@@ -63,8 +63,8 @@ Screenshots:
 | Two windows, z ordered | The notepad, with the Sinclair style shift-reporting cursor |
 | ![Commander](images/zxdesk-commander.png) | ![Clock and calendar](images/zxdesk-clock-calendar.png) |
 | Two pane commander, over devices rather than directories | Clock and calendar |
-| ![A loaded app](images/zxdesk-counter.png) | ![The FILE menu](images/zxdesk-file-menu.png) |
-| The counter example, loaded from a file and running in a window | The FILE menu, with LOAD for app files |
+| ![Three loaded apps](images/zxdesk-apps.png) | ![The FILE menu](images/zxdesk-file-menu.png) |
+| The three example apps, each loaded from a file | The FILE menu, with LOAD for app files |
 
 ---
 
@@ -170,13 +170,13 @@ tables.
 
 ### The memory map
 
-    $6000-$7E45   the slow region: panels, the calendar, the file
+    $6000-$7EA0   the slow region: panels, the calendar, the file
                   panels, the desktop setup, the commander, the
                   app loader
-    $7E46-$7FFF   free, 442 bytes, contended
-    $8000-$B47E   the fast region: everything else, starting with
+    $7EA1-$7FFF   free, 351 bytes, contended
+    $8000-$B4FD   the fast region: everything else, starting with
                   the application interface's jump table
-    $B47F-$BCFF   free, 2,177 bytes
+    $B4FE-$BCFF   free, 2,050 bytes
     $BD00         stack top
     $BDBD         interrupt handler
     $BE00-$BEFF   interrupt vector table
@@ -184,7 +184,7 @@ tables.
     $C640-$C750   the live notepad state
     $C751-$DF50   four transient surfaces
     $DF51-$FEFF   the heap, 8,111 bytes: window buffers, window
-                  state, and the loaded app
+                  state, and loaded apps
     $FF00-$FFFF   deliberately unused
 
 Two things in that map are worth explaining.
@@ -588,15 +588,22 @@ except the jump table, which is why the table is append only.
     ./mkapp.py examples/counter/counter.asm build/counter.zxa \
         --tap build/zxdesk.tap COUNTER
 
-The first line writes `api/zxdesk.inc` from the build: the 44 slots,
+The first line writes `api/zxdesk.inc` from the build: the 45 slots,
 the key codes, the storage constants and the descriptor offsets. The
 second assembles the example. The third also appends it to the tape
 image, after the desktop, so FILE, LOAD with FROM set to TAPE finds it.
 In the commander, ENTER on an app file runs it and ENTER on anything
 else still opens it in a notepad.
 
-`examples/counter/counter.asm` is the whole of a working app in 139
-bytes. The shape is:
+There are three examples, each the whole of a working app:
+
+| | | |
+|---|---|---|
+| `examples/counter` | 126 bytes | Draws, takes keys, keeps one byte of state. |
+| `examples/stopwatch` | 163 bytes | Uses the tick to count seconds. |
+| `examples/tally` | 223 bytes | Saves and loads through the storage layer, and asks before clearing. |
+
+The shape is:
 
                 include "zxdesk.inc"
                 org     APPORG
@@ -605,22 +612,30 @@ bytes. The shape is:
                 defw    Count           ; where it lives while in use
                 defw    Init, Draw, Key ; any of these may be nought
                 defw    Title
-                defb    10, 60, 12, 36  ; column, row, width, height
+                defb    16, 24, 12, 36  ; column, row, width, height
                 defw    0, 0, 0         ; close, scroll, scroll to
+                defw    Tick            ; or nought
 
 The descriptor has to come first, because the loader copies the first
-22 bytes of the image and calls it the app. `Draw` paints inside the
+24 bytes of the image and calls it the app. `Draw` paints inside the
 window with `ApiWinPrint`, where B is pixel rows below the title bar
 and C is columns in from the left border, so the app never asks where
-its window is. `Key` gets the key in A. To repaint after a key, lift
-the pointer, clear, draw, and hand the window back:
+its window is. `Key` gets the key in A. When what the window shows has
+changed, one call repaints it through `Draw`:
 
-                call    ApiPtrRestore
-                call    ApiWinClear
-                call    Draw
-                call    ApiWinGrab
-                call    ApiPtrSaveBg
-                jp      ApiPtrDraw
+                jp      ApiWinRefresh
+
+**The tick.** `Tick` is called once a frame while the window is in
+front and nothing is being dragged, with A holding the whole seconds
+that have passed since the last call. Most frames that is nought. The
+seconds are the clock's own, corrected for the interrupt not being
+50 Hz. It runs inside the frame, so it should return at once when
+there is nothing to do and repaint only when what it shows has changed.
+It is held back while a menu or a panel is up, and the seconds are kept
+for the next call.
+
+**Dialogs do not wait.** `ApiDlgConfirm` returns at once and calls the
+routine in BC later, with A = 1 for yes. `examples/tally` shows it.
 
 **The file.** Eight bytes of header: `ZXA`, the interface version the
 app needs, the image length, the relocation count. Then the image,
@@ -628,7 +643,8 @@ then one word per relocation, each the offset of a word in the image
 that holds an address. `mkapp.py` finds those by assembling at two
 origins and comparing, then assembles at a third to prove the list is
 complete, which also catches the one thing that can't be relocated: an
-instruction that takes half an address.
+instruction that takes half an address. A file that asks for version 3
+has the 22 byte descriptor 1.1.0 used, with no tick, and still loads.
 
 **Where it lives.** In a heap block, relocated as it loads. A 48K has
 no spare address range to promise an app, and the heap is the only
@@ -637,12 +653,70 @@ the spare banks are a place to load from rather than a place to run:
 they page in at `$C000`, which is where the heap and every window's
 state already sit.
 
-**The limits.** One app is loaded at a time. It stays loaded when its
-window closes, and loading another frees it. The size limit is the
-device's: 256 bytes from the RAM device, 511 from tape, 8,192 from a
-bank. A file asking for a newer interface than the desktop has, a
-relocation pointing outside the image and a file cut short are each
-refused with an alert, and the heap is left as it was.
+**The limits.** Three apps can be loaded at once, and loading the same
+file twice gives two copies, each with its own state. An app stays in
+memory after its window closes and is freed by the next load. The size
+limit is the device's: 256 bytes from the RAM device, 511 from tape,
+8,192 from a bank. A file asking for a newer interface than the desktop
+has, a relocation pointing outside the image and a file cut short are
+each refused with an alert, and the heap is left as it was.
+
+### The slots
+
+Slot n is a jump at `$8000 + 3n`. Rows and columns are pixel rows and
+byte columns. "Window relative" means B = pixel rows below the title
+bar and C = columns in from the left border of the window in front.
+Unless a row says otherwise, assume every register is changed.
+
+| Slot | Name | In | Out |
+|---|---|---|---|
+| 1 | `ApiVersion` | | A = interface version, B = slot count |
+| 2 | `ApiWndOpen` | A = an `APP_` kind | Carry if no window could be opened |
+| 3 | `ApiWndClose` | | Closes the front window, asking its app first |
+| 4 | `ApiWndIsFront` | | Z if the live window is in front |
+| 5 | `ApiWndRepaint` | | Repaints the desktop and every window |
+| 6 | `ApiWndBar` | | Redraws the live window's scroll bar |
+| 7 | `ApiWinGrab` | | Copies the live window from the screen to its buffer |
+| 8 | `ApiPrint` | HL = string | Desktop use: the row comes from a desktop variable. Use 29 |
+| 9 | `ApiPrintClip` | HL = string | Desktop use, as 8. Use 29 |
+| 10 | `ApiFillRect` | | Desktop use: the rectangle is in desktop variables. Use 43 |
+| 11 | `ApiAddrAt` | A = pixel row, C = column | HL = screen address |
+| 12 | `ApiPtrRestore` | | Lifts the pointer off the screen. Call before painting |
+| 13 | `ApiPtrSaveBg` | | Saves what is under the pointer. Call after painting |
+| 14 | `ApiPtrDraw` | | Draws the pointer. Call after 13 |
+| 15 | `ApiAlloc` | BC = bytes, A = owner | HL = block. Carry if no room |
+| 16 | `ApiFree` | HL = a block, or nought | |
+| 17 | `ApiFreeOwner` | A = owner | Frees every block with that owner |
+| 18 | `ApiEvPost` | A = event type, B, C = its arguments | Carry if the queue was full |
+| 19 | `ApiStSelect` | A = an `ST_` device | Carry if there is no such device |
+| 20 | `ApiStOpen` | HL = name, B = `FA_READ` or `FA_OVERWRITE` | A = handle. Carry if it could not |
+| 21 | `ApiStClose` | A = handle | |
+| 22 | `ApiStRead` | A = handle, HL = buffer, BC = count | BC = bytes read |
+| 23 | `ApiStWrite` | A = handle, HL = buffer, BC = count | BC = bytes written |
+| 24 | `ApiStDir` | A = n, from nought | HL = name of the nth file, DE = its length. Carry if none |
+| 25 | `ApiStDelete` | HL = name | Carry if it could not |
+| 26 | `ApiStCaps` | | A = `STCAP_` bits of the current device |
+| 27 | `ApiStIdent` | | A = the current `ST_` device |
+| 28 | `ApiWinRec` | | HL = the live window: X, Y, width, height, a byte each |
+| 29 | `ApiWinPrint` | Window relative, HL = string | Printed, cut at the window's edge |
+| 30 | `ApiWinPrintInv` | As 29 | The same, inverted |
+| 31 | `ApiWinClear` | | Blanks the inside of the window |
+| 32 | `ApiWinAddr` | Window relative | HL = screen address |
+| 33 | `ApiWinRows` | | A = pixel rows inside the window. Keeps the other registers |
+| 34 | `ApiWinCols` | | A = columns inside the window. Keeps the other registers |
+| 35 | `ApiWinApp` | | HL = the live window's descriptor |
+| 36 | `ApiWndCloseNow` | | Closes the front window without asking |
+| 37 | `ApiKbdMods` | | A: bit 0 CAPS SHIFT, bit 1 SYMBOL SHIFT |
+| 38 | `ApiWinPrintIf` | As 29, A = nought or not | Printed plain if A is nought, else inverted |
+| 39 | `ApiDlgAlert` | HL = line, DE = second line or nought | An alert, 14 characters a line |
+| 40 | `ApiDlgConfirm` | HL, DE as 39, BC = routine | Returns at once. The routine gets A = 1 for yes |
+| 41 | `ApiDlgSave3` | HL, DE as 39, BC = routine | The routine gets A = 0 cancel, 1 discard, 2 save |
+| 42 | `ApiOpenFile` | HL = name on the current device | Runs an app file, or opens a notepad. Carry: nothing opened. A = 1: an alert is up |
+| 43 | `ApiWinFill` | Window relative, D = rows, E = columns, HL = pattern | Fills. The caller keeps it inside the window |
+| 44 | `ApiWinRefresh` | | Repaints the front window through its `Draw` |
+
+One file is open at a time, on every device. A string ends in a nought
+byte. Slot 0 is the desktop's own entry point.
 
 ---
 
@@ -696,7 +770,7 @@ build it blind on an emulator, so it waits until one arrives.
     tstates.py, taplant.py      timing arithmetic, and tape block planting
     mkapi.py, mkapp.py          write the app include, and assemble an app
     api/zxdesk.inc              what an app is assembled against
-    examples/counter/           a worked app, built outside the desktop
+    examples/                   three worked apps, built outside the desktop
 
     src/zxdesk.asm              the desktop
     src/damage.inc              damage rectangles and the narrow desktop fill

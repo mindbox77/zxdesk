@@ -1,4 +1,4 @@
-; ZX Desk application interface, version 3.
+; ZX Desk application interface, version 4.
 ; Written by mkapi.py. Do not edit.
 ; Slot n is a jump at $8000 + 3n. Arguments are in src/api.inc.
 
@@ -45,10 +45,11 @@ ApiDlgConfirm   equ     $8078   ; 40
 ApiDlgSave3     equ     $807B   ; 41
 ApiOpenFile     equ     $807E   ; 42
 ApiWinFill      equ     $8081   ; 43
+ApiWinRefresh   equ     $8084   ; 44
 
-API_SLOTS       equ     44
-API_VER         equ     3
-APPSIZE         equ     22
+API_SLOTS       equ     45
+API_VER         equ     4
+APPSIZE         equ     24
 APP_ABOUT       equ     1
 APP_CAL         equ     3
 APP_CLOCK       equ     2
@@ -65,6 +66,7 @@ APP_NOTE        equ     0
 APP_SCROLL      equ     18
 APP_SCROLLTO    equ     20
 APP_STSZ        equ     0
+APP_TICK        equ     22
 APP_TITLE       equ     10
 APP_W           equ     14
 APP_X           equ     12

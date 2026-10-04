@@ -177,6 +177,7 @@ MlIdle:
                 ld      hl,Resizing
                 or      (hl)
                 call    z,ClkService
+                call    AppTick
 IFNDEF SCRIPT
                 call    ShowStatus      ; cheap enough to run during a drag
 ENDIF

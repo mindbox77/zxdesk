@@ -6,7 +6,7 @@
         --tap build/zxdesk.tap COUNTER
 
 The source includes "zxdesk.inc", starts with ORG APPORG and puts its
-22 byte descriptor first. It is assembled at three origins: two to find
+24 byte descriptor first. It is assembled at three origins: two to find
 the words that hold addresses, the third to prove the list is complete.
 
 File: 'ZXA', interface version, image length, relocation count, the
@@ -22,7 +22,6 @@ import sys
 import tempfile
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-APPSIZE = 22
 
 
 def pasmo():
@@ -44,9 +43,9 @@ def assemble(src, org, inc):
         os.unlink(out)
 
 
-def api_version(inc):
+def api_const(inc, name):
     text = open(os.path.join(inc, "zxdesk.inc")).read()
-    return int(re.search(r"^API_VER\s+equ\s+(\d+)", text, re.M).group(1))
+    return int(re.search(rf"^{name}\s+equ\s+(\d+)", text, re.M).group(1))
 
 
 def build(src, inc=None):
@@ -57,7 +56,7 @@ def build(src, inc=None):
     c = assemble(src, 0x1234, inc)
     if not (len(a) == len(b) == len(c)):
         sys.exit("the image changes length with its origin")
-    if len(a) < APPSIZE:
+    if len(a) < api_const(inc, "APPSIZE"):
         sys.exit("shorter than a descriptor")
     relocs = []
     for i in range(1, len(a)):
@@ -74,7 +73,7 @@ def build(src, inc=None):
         sys.exit(f"offset {bad}: uses half an address, which cannot be "
                  f"relocated. Load the whole word instead.")
     out = bytearray(b"ZXA")
-    out.append(api_version(inc))
+    out.append(api_const(inc, "API_VER"))
     out += len(a).to_bytes(2, "little")
     out += len(relocs).to_bytes(2, "little")
     out += a

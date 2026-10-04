@@ -4,7 +4,9 @@
 ;  relocation count R (word). Then N bytes assembled at origin 0,
 ;  the 22 byte descriptor first. Then R words: offsets into the
 ;  image of words that get the load address added.
-;  The image lives in a heap block. One app loaded at a time.
+;  The image lives in a heap block. LDRSLOTS apps at a time.
+;  A file asking for version 3 or less has a 22 byte descriptor
+;  with no tick vector.
 ; ============================================================
 HEAPOWN_APP     equ     $20
 LDRHDRSZ        equ     8
@@ -82,20 +84,46 @@ ELSE
                 ld      a,(LdrHdr+3)
                 cp      API_VER+1
                 jp      nc,LdrFail
-                ld      a,(LdrLoaded)
+                ; give back every loaded app that no window is running
+                xor     a
+LdrSweep:
+                ld      (LdrSlot),a
+                call    LdrUsedAt
+                ld      a,(hl)
+                or      a
+                jr      z,LdrSwNext
+                ld      a,(LdrSlot)
+                add     a,APP_EXT
+                call    AppAt
+                call    WndFindApp              ; carry if no window runs it
+                jr      nc,LdrSwNext
+                ld      a,(LdrSlot)
+                add     a,HEAPOWN_APP
+                call    HeapFreeOwner
+                call    LdrUsedAt
+                ld      (hl),0
+LdrSwNext:
+                ld      a,(LdrSlot)
+                inc     a
+                cp      LDRSLOTS
+                jr      c,LdrSweep
+                ; and take the first slot that is free
+                xor     a
+LdrFind:
+                ld      (LdrSlot),a
+                call    LdrUsedAt
+                ld      a,(hl)
                 or      a
                 jr      z,LdrFresh
-                ld      hl,AppExt
-                call    WndFindApp              ; carry if no window runs it
+                ld      a,(LdrSlot)
+                inc     a
+                cp      LDRSLOTS
+                jr      c,LdrFind
                 ld      hl,TxtLdrBusy
-                jp      nc,LdrFail
-                ld      a,HEAPOWN_APP
-                call    HeapFreeOwner
-                xor     a
-                ld      (LdrLoaded),a
+                jp      LdrFail
 LdrFresh:
                 ld      hl,(LdrHdr+4)
-                ld      de,APPSIZE
+                ld      de,APPSIZE-2
                 or      a
                 sbc     hl,de
                 jp      c,LdrBad                ; no room for a descriptor
@@ -108,11 +136,12 @@ LdrFresh:
                 ld      (LdrSize),hl
                 ld      b,h
                 ld      c,l
-                ld      a,HEAPOWN_APP
+                ld      a,(LdrSlot)
+                add     a,HEAPOWN_APP
                 call    HeapAlloc
                 jr      nc,LdrGot
                 ld      hl,TxtLdrRoom
-                jr      LdrFail
+                jp      LdrFail
 LdrGot:
                 ld      (LdrBase),hl
                 ld      bc,(LdrSize)
@@ -156,13 +185,28 @@ LdrRel:
                 jr      LdrRel
 LdrDone:
                 call    LdrShut
+                ld      a,(LdrSlot)
+                add     a,APP_EXT
+                call    AppAt
+                push    hl
+                ex      de,hl
                 ld      hl,(LdrBase)
-                ld      de,AppExt
                 ld      bc,APPSIZE
                 ldir
-                ld      a,1
-                ld      (LdrLoaded),a
-                ld      a,APP_EXT
+                pop     hl
+                ld      a,(LdrHdr+3)
+                cp      4
+                jr      nc,LdrTicks
+                ld      de,APP_TICK             ; an older file: those two
+                add     hl,de                   ; bytes are not a vector
+                ld      (hl),0
+                inc     hl
+                ld      (hl),0
+LdrTicks:
+                call    LdrUsedAt
+                ld      (hl),1
+                ld      a,(LdrSlot)
+                add     a,APP_EXT
                 call    WndOpen
                 ld      hl,TxtLdrRoom
                 jr      c,LdrAlert              ; it stays loaded all the same
@@ -171,7 +215,8 @@ LdrDone:
 LdrBadPop:
                 pop     hl
 LdrBad:
-                ld      a,HEAPOWN_APP
+                ld      a,(LdrSlot)
+                add     a,HEAPOWN_APP
                 call    HeapFreeOwner
                 ld      hl,TxtLdrBad
 LdrFail:
@@ -192,13 +237,24 @@ LdrShut:
                 ld      a,(LdrHandle)
                 jp      StClose
 
-LdrLoaded:      defb    0
+; HL = the in use flag of slot (LdrSlot)
+LdrUsedAt:
+                ld      a,(LdrSlot)
+                ld      hl,LdrUsed
+                add     a,l
+                ld      l,a
+                ret     nc
+                inc     h
+                ret
+
+LdrSlot:        defb    0
+LdrUsed:        defs    LDRSLOTS
 LdrHandle:      defb    0
 LdrBase:        defw    0
 LdrSize:        defw    0
 LdrHdr:         defs    LDRHDRSZ
 TxtLdrOld:      defb    "NEEDS NEW DESK",0
-TxtLdrBusy:     defb    "CLOSE IT FIRST",0
+TxtLdrBusy:     defb    "CLOSE AN APP",0
 TxtLdrRoom:     defb    "NO ROOM",0
 TxtLdrBad:      defb    "BAD APP FILE",0
 ENDIF

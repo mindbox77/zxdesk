@@ -53,7 +53,10 @@ APP_SCROLL      equ     18
 ; rather than a control, and clicking an arrow that does nothing is
 ; worse than having no arrow.
 APP_SCROLLTO    equ     20
-APPSIZE         equ     22
+; Called once an idle frame while the window is in front.
+; A = whole seconds since the last call. Null means no tick.
+APP_TICK        equ     22
+APPSIZE         equ     24
 
 APP_NOTE        equ     0
 APP_ABOUT       equ     1
@@ -61,7 +64,8 @@ APP_CLOCK       equ     2
 APP_CAL         equ     3
 APP_CMD         equ     4
 APP_KEYS        equ     5
-APP_EXT         equ     6       ; the loaded app, see loader.inc
+APP_EXT         equ     6       ; the first loaded app, see loader.inc
+LDRSLOTS        equ     3       ; how many can be loaded at once
 
 AppTable:
 AppNote:        defw    NOTESTSZ, NoteState, NoteInit, NoteDrawInterior
@@ -72,6 +76,7 @@ AppNote:        defw    NOTESTSZ, NoteState, NoteInit, NoteDrawInterior
                 defw    NoteClose
                 defw    NoteScrollInfo
                 defw    NoteScrollTo
+                defw    0
                 ; The about window has no state, so its size is nought and
                 ; both halves of the swap are a compare and a return. Its
                 ; key vector is null, which says what an explicit test on
@@ -83,6 +88,7 @@ AppAbout:       defw    0, 0, 0, WdAbout
                 defw    0                       ; nothing to lose, so nothing
                                                 ; to ask
                 defw    0, 0
+                defw    0
                 ; The clock keeps nothing per window either, and for a
                 ; better reason than the about window's: the time belongs
                 ; to the machine, so two clock windows showing different
@@ -92,6 +98,7 @@ AppClock:       defw    0, 0, 0, ClkDraw
                 defb    18, 40, CLKW, CLKH
                 defw    0
                 defw    0, 0
+                defw    0
                 ; The calendar does, and it is the smallest state in the
                 ; system at two bytes, which is the point of it being a
                 ; heap block rather than a special case.
@@ -100,6 +107,7 @@ AppCal:         defw    CALSTSZ, CalState, CalInit, CalDraw
                 defb    4, 32, CALW, CALH
                 defw    0
                 defw    0, 0
+                defw    0
                 ; The commander. A window rather than a panel because a
                 ; panel thirty columns wide would have wanted a save under
                 ; arena nearly three kilobytes larger, and a window takes
@@ -110,6 +118,7 @@ AppCmd:         defw    CMDSTSZ, CmdState, CmdInit, CmdDraw
                 defw    0
                 defw    CmdScrollInfo
                 defw    CmdScrollTo
+                defw    0
                 ; The shortcut list. No state, no key vector and no close
                 ; vector: there is nothing to type at a list and nothing
                 ; to lose by shutting it.
@@ -118,8 +127,9 @@ AppKeys:        defw    0, 0, 0, KeysDraw
                 defb    14, 20, KEYSW, KEYSH
                 defw    0
                 defw    0, 0
-                ; Filled in by the loader from the app's own file.
-AppExt:         defs    APPSIZE
+                defw    0
+                ; Filled in by the loader, one for each loaded app.
+AppExt:         defs    APPSIZE*LDRSLOTS
 
 ; ------------------------------------------------------------
 ;  AppAt
@@ -214,3 +224,27 @@ AppStateAt:
                 or      e                       ; Z if it never got a block
                 pop     hl                      ; HL = the live copy
                 ret
+
+; ------------------------------------------------------------
+;  AppTick
+;  Once an idle frame, to the app in front. A = seconds since
+;  the last one. Held back while anything is drawn over it.
+; ------------------------------------------------------------
+AppTick:
+                ld      a,(Dragging)
+                ld      hl,Resizing
+                or      (hl)
+                ld      hl,DlgUp
+                or      (hl)
+                ld      hl,MenuOpen
+                or      (hl)
+                ret     nz
+                call    WndIsFront
+                ret     nz
+                ld      hl,TickSecs
+                ld      a,(hl)
+                ld      (hl),0
+                ld      c,APP_TICK
+                jp      AppCall
+
+TickSecs:       defb    0

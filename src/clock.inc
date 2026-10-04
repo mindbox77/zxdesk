@@ -128,6 +128,8 @@ ClkNoSec:
 ; it advances anything, because the correction belongs to the second
 ; that is starting rather than the one that has ended.
 ClkSecond:
+                ld      hl,TickSecs             ; for AppTick
+                inc     (hl)
                 xor     a
                 ld      (ClkFrames),a
                 ld      a,(ClkFrac)

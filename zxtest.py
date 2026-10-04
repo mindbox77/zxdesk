@@ -404,6 +404,8 @@ def api_checks(m):
         ("ApiDlgSave3", "DlgSave3"),
         ("ApiOpenFile", "SysOpenFile"),
         ("ApiWinFill", "WinFill"),
+        # version 4
+        ("ApiWinRefresh", "WinRefresh"),
     ]
     bad = []
     for n, (slot, target) in enumerate(slots):
@@ -3057,13 +3059,14 @@ def filemgr_checks():
 
 
 def loader_checks():
-    """A loadable app, through the real loader.
+    """Loadable apps, through the real loader.
 
-    The counter example is assembled by mkapp.py against api/zxdesk.inc
-    and nothing else, written to the RAM device through the storage
-    calls, and opened by name. The tape path is not here: it needs the
-    ROM loader and a tape signal.
+    The examples are assembled by mkapp.py against api/zxdesk.inc and
+    nothing else, written to a device through the storage calls, and
+    opened by name. The tape path is not here: it needs the ROM loader
+    and a tape signal.
     """
+    import base64
     import mkapi
     import mkapp
     failures = []
@@ -3075,15 +3078,20 @@ def loader_checks():
     else:
         print("  api/zxdesk.inc matches this build")
 
-    data = mkapp.build("examples/counter/counter.asm")
+    apps = {}
+    for name in ("counter", "stopwatch", "tally"):
+        apps[name] = mkapp.build(f"examples/{name}/{name}.asm")
+        d = apps[name]
+        print(f"  {name}: {len(d)} bytes, image "
+              f"{int.from_bytes(d[4:6], 'little')}, "
+              f"{int.from_bytes(d[6:8], 'little')} relocations")
+    data = apps["counter"]
     n = int.from_bytes(data[4:6], "little")
-    r = int.from_bytes(data[6:8], "little")
-    print(f"  counter: {len(data)} bytes, image {n}, {r} relocations")
-    if len(data) > 256:
-        failures.append("the counter no longer fits a RAM device file")
+    if len(data) > 256 or len(apps["stopwatch"]) > 256:
+        failures.append("an example no longer fits a RAM device file")
         return failures
 
-    BUF, NAME = 0x5B00, 0x5C10
+    BUF, NAME = 0x5B00, 0x5D10
 
     def put(m, name, blob):
         for i, ch in enumerate(name):
@@ -3107,15 +3115,15 @@ def loader_checks():
         m.call("ApiOpenFile")
         return m.m.a, m.m.f & 1
 
-    def shown(m):
-        x = m.peek(m.sym("WinX")) + 1 + 3
+    def shown(m, col=3, count=3):
+        x = m.peek(m.sym("WinX")) + 1 + col
         y = m.peek(m.sym("WinY")) + m.sym("WinCapH") + 4
-        return "".join(next((ch for ch in "0123456789"
+        return "".join(next((ch for ch in "0123456789:"
                              if m.font_glyph(ch) == m.glyph_at(x + i, y)), "?")
-                       for i in range(3))
+                       for i in range(count))
 
     def key(m, k):
-        m.m.b = m.sym(k)
+        m.m.b = m.sym(k) if isinstance(k, str) and len(k) > 1 else ord(k)
         m.call("HdlKey")
 
     def heap_used(m):
@@ -3126,6 +3134,10 @@ def loader_checks():
                 used += size
             at += size + m.sym("HEAPHDR")
         return used
+
+    def loaded(m):
+        return sum(m.peek(m.sym("LdrUsed") + i)
+                   for i in range(m.sym("LDRSLOTS")))
 
     m = boot(text="")
     idle = heap_used(m)
@@ -3147,10 +3159,8 @@ def loader_checks():
               f"window open")
     if shown(m) != "000":
         failures.append(f"the counter drew {shown(m)!r}, not 000")
-    key(m, "KEY_UP")
-    key(m, "KEY_UP")
-    key(m, "KEY_UP")
-    key(m, "KEY_DOWN")
+    for k in ("KEY_UP", "KEY_UP", "KEY_UP", "KEY_DOWN"):
+        key(m, k)
     if shown(m) != "002":
         failures.append(f"after up, up, up, down it shows {shown(m)!r}")
     else:
@@ -3159,26 +3169,39 @@ def loader_checks():
     if shown(m) != "000":
         failures.append("ENTER did not clear the count")
 
-    # a second load while the first is on screen
+    # several at once: each load is its own copy with its own state
+    key(m, "KEY_UP")
     a, cy = run(m, "COUNTER")
-    if (a, cy) != (1, 0) or not m.peek(m.sym("DgDepth")):
-        failures.append("loading over a running app was not refused")
+    second = m.peek16(m.sym("LdrBase"))
+    if ((a, cy) != (0, 0) or second == base or shown(m) != "000"
+            or m.peek16(m.sym("WinApp")) != ext + m.sym("APPSIZE")):
+        failures.append("a second copy did not load beside the first")
     else:
-        print("  loading again while it runs is refused with an alert")
+        print(f"  a second copy loads beside it at ${second:04X} with its "
+              f"own count")
+    a, cy = run(m, "COUNTER")
+    a4, cy4 = run(m, "COUNTER")
+    if (a, cy) != (0, 0) or loaded(m) != 3:
+        failures.append("the third copy did not load")
+    elif (a4, cy4) != (1, 0) or not m.peek(m.sym("DgDepth")):
+        failures.append("a fourth load was not refused")
+    else:
+        print("  three run at once, and a fourth is refused with an alert")
     m.m.a = 13
     m.call("PnlKey")
     if m.peek(m.sym("DgDepth")):
         failures.append("the alert did not close")
 
-    # closed, it stays loaded; loading again replaces it
-    m.call("WndClose")
-    if m.peek(m.sym("WndCount")) != before or not m.peek(m.sym("LdrLoaded")):
-        failures.append("closing the window went wrong")
+    # closing them all and loading again gives the memory back first
+    for _ in range(3):
+        m.call("WndClose")
     a, cy = run(m, "COUNTER")
-    if (a, cy) != (0, 0) or shown(m) != "000":
-        failures.append("it would not load again after closing")
+    if ((a, cy) != (0, 0) or loaded(m) != 1 or shown(m) != "000"
+            or m.peek(m.sym("WndCount")) != before + 1):
+        failures.append("closed apps were not given back on the next load")
+        print(f"  A {a}, carry {cy}, {loaded(m)} loaded")
     else:
-        print("  closed and loaded again, the old copy is freed first")
+        print("  closed apps are freed by the next load")
     m.call("WndClose")
 
     # files that must be refused, each leaving the heap as it was
@@ -3195,13 +3218,29 @@ def loader_checks():
         count = m2.peek(m2.sym("WndCount"))
         a, cy = run(m2, "BAD")
         if ((a, cy) != (1, 0) or m2.peek(m2.sym("WndCount")) != count
-                or heap_used(m2) != idle or m2.peek(m2.sym("LdrLoaded"))):
+                or heap_used(m2) != idle or loaded(m2)):
             failures.append(f"{label} was not refused cleanly")
             print(f"  {label}: A {a}, carry {cy}, heap {heap_used(m2)} "
                   f"against {idle}")
         else:
             print(f"  {label} is refused with an alert and the heap is "
                   f"as it was")
+
+    # the counter.zxa released with 1.1.0: version 3, 22 byte descriptor
+    old = base64.b64decode(COUNTER_V3)
+    mo = boot(text="")
+    put(mo, "OLD", old)
+    a, cy = run(mo, "OLD")
+    key(mo, "KEY_UP")
+    mo.poke(mo.sym("TickSecs"), 3)
+    mo.call("AppTick")
+    tick = mo.peek16(mo.sym("AppExt") + mo.sym("APP_TICK"))
+    if (a, cy) != (0, 0) or shown(mo) != "001" or tick:
+        failures.append("the 1.1.0 counter file no longer loads and runs")
+        print(f"  A {a}, carry {cy}, shows {shown(mo)!r}, tick ${tick:04X}")
+    else:
+        print("  the counter.zxa released with 1.1.0 still loads, with no "
+              "tick vector")
 
     # a file that is not an app still opens in a notepad
     m3 = boot(text="HELLO")
@@ -3214,22 +3253,91 @@ def loader_checks():
     else:
         print("  a document still opens in a notepad")
 
-    # a 128K: read out of a bank, run in the heap
+    # the stopwatch: the tick, and when it is held back
+    ms = boot(text="")
+    put(ms, "WATCH", apps["stopwatch"])
+    a, cy = run(ms, "WATCH")
+
+    def tick(secs):
+        ms.poke(ms.sym("TickSecs"), secs)
+        ms.call("AppTick")
+        return shown(ms, 2, 5)
+
+    if (a, cy) != (0, 0) or shown(ms, 2, 5) != "00:00":
+        failures.append("the stopwatch did not load")
+    elif tick(5) != "00:00":
+        failures.append("the stopwatch ran before it was started")
+    else:
+        key(ms, "KEY_ENTER")
+        t1, t2 = tick(5), tick(70)
+        ms.poke(ms.sym("MenuOpen"), 1)
+        t3 = tick(9)
+        held = ms.peek(ms.sym("TickSecs"))
+        ms.poke(ms.sym("MenuOpen"), 0)
+        ms.call("AppTick")
+        t4 = shown(ms, 2, 5)
+        key(ms, "KEY_ENTER")
+        t5 = tick(30)
+        key(ms, "KEY_DOWN")
+        t6 = shown(ms, 2, 5)
+        got = (t1, t2, t3, held, t4, t5, t6)
+        if got != ("00:05", "01:15", "01:15", 9, "01:24", "01:24", "00:00"):
+            failures.append("the stopwatch does not keep time by the tick")
+            print(f"  {got}")
+        else:
+            print("  the stopwatch counts by the tick: 00:05, 01:15, held "
+                  "under a menu, then 01:24, stops, clears")
+    # one real second through the clock
+    ms.poke(ms.sym("TickSecs"), 0)
+    ms.call("ClkSecond")
+    if ms.peek(ms.sym("TickSecs")) != 1:
+        failures.append("the clock's second does not reach the tick")
+    else:
+        print("  a second on the clock is a second on the tick")
+
+    # a 128K: read out of a bank, run in the heap. The tally is too
+    # big for a RAM device file, so this is also its test.
     mb = Machine("build/zxdesk.bin", "build/zxdesk.sym", banked=True)
     for rt in ("DetectMachine", "SetupIM2", "BuildScrTab", "MouseInit",
                "JoyInit", "StInit", "SetLoad", "SetApply", "DskInit",
                "InitScreen", "WndInit", "WinDraw", "WinGrab", "PtrSaveBg",
                "PtrDraw"):
         mb.call(rt)
-    put(mb, "COUNTER", data)
-    a, cy = run(mb, "COUNTER")
-    key(mb, "KEY_UP")
+    put(mb, "TALLY", apps["tally"])
+    a, cy = run(mb, "TALLY")
     if (mb.peek(mb.sym("StBackend")) != mb.sym("ST_BANK") or (a, cy) != (0, 0)
-            or shown(mb) != "001"):
-        failures.append("the app does not load from a 128K bank")
+            or shown(mb) != "000"):
+        failures.append("the tally does not load from a 128K bank")
         print(f"  128K: A {a}, carry {cy}, shows {shown(mb)!r}")
     else:
-        print("  on a 128K it loads from the bank device and runs the same")
+        print("  on a 128K the tally loads from the bank device")
+        key(mb, "L")
+        none = mb.peek(mb.sym("DgDepth"))
+        mb.m.a = 13
+        mb.call("PnlKey")
+        for k in ("KEY_UP", "KEY_UP", "KEY_UP", "S", "KEY_UP", "KEY_UP"):
+            key(mb, k)
+        five = shown(mb)
+        key(mb, "KEY_DOWN")                 # asks; NO is the default
+        asked = mb.peek(mb.sym("DgDepth"))
+        mb.m.a = 13
+        mb.call("PnlKey")
+        kept = shown(mb)
+        key(mb, "KEY_DOWN")
+        for k in (mb.sym("KEY_DOWN"), 13):  # down to YES, then ENTER
+            mb.m.a = k
+            mb.call("PnlKey")
+        cleared = shown(mb)
+        key(mb, "L")
+        back = shown(mb)
+        got = (none, five, asked, kept, cleared, back,
+               mb.peek(mb.sym("DgDepth")))
+        if got != (1, "005", 1, "005", "000", "003", 0):
+            failures.append("the tally's storage or dialog is wrong")
+            print(f"  {got}")
+        else:
+            print("  L with no file alerts; S saves 003; DOWN asks, NO keeps "
+                  "005, YES clears; L brings 003 back")
 
     # FILE, LOAD
     m4 = boot(text="")
@@ -3247,11 +3355,25 @@ def loader_checks():
     for k in list("NOPE") + [4, 4, 13]:
         m4.m.a = k if isinstance(k, int) else ord(k)
         m4.call("PnlKey")
+    blank = bytes(8)
+    row2 = [m4.glyph_at(m4.sym("DGX") + c, m4.sym("DGROW0") + 8)
+            for c in range(1, m4.sym("DGW") - 1)]
     if not m4.peek(m4.sym("DgDepth")):
         failures.append("FILE, LOAD of a missing name said nothing")
+    elif any(g != blank for g in row2):
+        failures.append("an alert with one line prints rubbish on the second")
     else:
-        print("  and a name that is not there gets COULD NOT LOAD")
+        print("  and a name that is not there gets COULD NOT LOAD, with "
+              "the second line left empty")
     return failures
+
+
+# examples/counter as released with 1.1.0, interface version 3.
+COUNTER_V3 = (
+    "WlhBA4sAEAABAHYAFgAbAEkAewAKPAwkAAAAAAAArzJ2AMk6dgAhdwAOZM1AAA4KzUAAxjB3"
+    "IXcAAQMEzVeAIYMAAQEOw1eANi80kTD8gSPJ/gMoCv4EKAz+DcCvGAo6dgA8GAQ6dgA9MnYA"
+    "zSSAzV2AzRsAzRWAzSeAwyqAADAwMABDT1VOVEVSAFVQIERPV04AAgAEAAYACAAKABgAHAAf"
+    "ACQAKQAvADgAWABeAGIAawA=")
 
 
 def watchdog_checks():

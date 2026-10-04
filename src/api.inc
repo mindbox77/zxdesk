@@ -4,7 +4,7 @@
 ;  Slot 0 is the cold start. Order is append only.
 ;  API_VER goes up when a slot is added.
 ; ============================================================
-API_VER         equ     3
+API_VER         equ     4
 
                 ; slot 0 is Main, in zxdesk.asm
 ApiVersion:     jp      ApiVerGet       ; 1  out: A = API_VER, B = slots
@@ -67,6 +67,9 @@ ApiDlgConfirm:  jp      DlgConfirm      ; 40 HL, DE, BC = callback, A = 1 yes
 ApiDlgSave3:    jp      DlgSave3        ; 41 HL, DE, BC = callback, A = 0 1 2
 ApiOpenFile:    jp      SysOpenFile     ; 42 HL = name. Carry: nothing. A = 1: alert up
 ApiWinFill:     jp      WinFill         ; 43 B, C, D = rows, E = columns, HL
+
+                ; version 4: the descriptor gains a tick vector
+ApiWinRefresh:  jp      WinRefresh      ; 44 repaint the live window by its draw
 ApiEnd:
 
 API_SLOTS       equ     (ApiEnd-Main)/3
@@ -175,3 +178,15 @@ WinFill:
                 ld      a,d
                 ld      (FrH),a
                 jp      DevFillRect
+
+; The repaint every app does: pointer up, clear, draw, grab,
+; pointer back. Only for the window in front.
+WinRefresh:
+                call    PtrRestore
+                call    WinClear
+                ld      c,APP_DRAW
+                call    AppCall
+                call    WndScrollBar
+                call    WinGrab
+                call    PtrSaveBg
+                jp      PtrDraw
