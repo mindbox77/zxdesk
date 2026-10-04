@@ -436,8 +436,12 @@ CmdOpen:
                 call    ApiOpenFile
                 jr      c,CmdRepaint            ; no room, and the commander
                                                 ; is still live to say so
+                push    af
                 ld      a,(CmdWasK)
                 call    ApiStSelect
+                pop     af
+                or      a
+                ret     nz                      ; an alert is up, leave it
                 jp      ApiWndRepaint
 
 ; ------------------------------------------------------------

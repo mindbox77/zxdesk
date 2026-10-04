@@ -4036,6 +4036,8 @@ SlowStart:
 
                 include "filemgr.inc"
 
+                include "loader.inc"
+
                 include "dsksetup.inc"
 
                 include "commander.inc"

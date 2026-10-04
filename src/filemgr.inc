@@ -264,33 +264,10 @@ FmClose:
 FmSavePanel:
                 call    NoteIsFront     ; and SAVE AS saves it
                 ret     nz
-                call    PnlUpInc
-                ld      a,1
-                ld      (FmUp),a
-                ld      a,DLGX
-                ld      (SuX),a
-                ld      (PnlX),a
-                ld      a,DLGY
-                ld      (SuY),a
-                ld      (PnlY),a
-                ld      a,DLGW
-                ld      (SuW),a
-                ld      (PnlW),a
-                ld      a,DLGH
-                ld      (SuH),a
-                ld      (PnlH),a
-                ld      a,DLGROW0
-                ld      (PnlRow0),a
-                ld      a,3
-                ld      (PnlRows),a
                 ld      hl,FmSaveRows
-                ld      (PnlTab),hl
-                ld      hl,TxtFmSaveTitle
-                ld      (PnlTitle),hl
-                ld      hl,0
-                ld      (PnlAfter),hl
-                ld      a,1                     ; the focus starts in the field
-                ld      (PnlFocus),a
+                ld      de,TxtFmSaveTitle
+                ld      a,3
+                call    FmNameSetup
                 ; seed the box with the name the note already has, so
                 ; saving again is ENTER twice rather than typing it out
                 ld      hl,NoteName
@@ -310,6 +287,98 @@ FmsSeeded:
                 call    SaveUnder
                 call    PnlPaint
                 jp      PtrShow
+
+; FILE, LOAD: a name and where from. Runs an app file.
+FmLoadPanel:
+                ld      hl,FmLoadRows
+                ld      de,TxtFmLoadTitle
+                ld      a,4
+                call    FmNameSetup
+                xor     a
+                ld      (FmField),a
+                jr      FmsSeeded
+
+; HL = rows, DE = title, A = row count. Focus starts in the field.
+FmNameSetup:
+                ld      (PnlTab),hl
+                ld      (PnlTitle),de
+                ld      (PnlRows),a
+                call    PnlUpInc
+                ld      a,1
+                ld      (FmUp),a
+                ld      (PnlFocus),a
+                ld      a,DLGX
+                ld      (SuX),a
+                ld      (PnlX),a
+                ld      a,DLGY
+                ld      (SuY),a
+                ld      (PnlY),a
+                ld      a,DLGW
+                ld      (SuW),a
+                ld      (PnlW),a
+                ld      a,DLGH
+                ld      (SuH),a
+                ld      (PnlH),a
+                ld      a,DLGROW0
+                ld      (PnlRow0),a
+                ld      hl,0
+                ld      (PnlAfter),hl
+                ret
+
+; The backend is put back before anything is drawn.
+FmDoLoad:
+                ld      a,(FmField)
+                or      a
+                ret     z
+                call    FmClose
+                call    StIdent
+                push    af
+                ld      a,(FmFrom)
+                or      a
+                ld      a,ST_TAPE
+                call    nz,StSelect
+                ld      hl,FmField
+                call    LdrLoadName
+                ld      b,a
+                pop     af
+                push    bc
+                call    StSelect
+                pop     af
+                cp      2
+                ret     nz                      ; loaded, or its own alert
+                ld      hl,TxtFmNoLoad
+                ld      de,0
+                jp      DlgAlert
+
+FmLoadRows:
+                defb    PT_LABEL
+                defw    TxtFmName, 0
+                defb    0
+                defw    0
+
+                defb    PT_FIELD
+                defw    0, FmField
+                defb    FMFIELDLEN
+                defw    0
+
+                defb    PT_CYCLE
+                defw    TxtFmFrom, FmFrom
+                defb    2
+                defw    NmFmFrom
+
+                defb    PT_ACTION
+                defw    TxtFmLoad, FmDoLoad
+                defb    0
+                defw    0
+
+NmFmFrom:       defw    TxtFmDisk, TxtFmTape
+FmFrom:         defb    0
+TxtFmLoadTitle: defb    "LOAD APP",0
+TxtFmFrom:      defb    "FROM",0
+TxtFmDisk:      defb    "DISK",0
+TxtFmTape:      defb    "TAPE",0
+TxtFmLoad:      defb    "LOAD",0
+TxtFmNoLoad:    defb    "COULD NOT LOAD",0
 
 FmDoSave:
                 ld      a,(FmField)
@@ -344,42 +413,6 @@ FMFIELDLEN      equ     10              ; a tape name. B3 widened the panel
                                         ; and RAMNAMESZ widened the backend,
                                         ; so this is the length a name is
                                         ; rather than the length that fitted
-
-; ------------------------------------------------------------
-;  SysOpenFile
-;  in:  HL = a name on the selected backend
-;  out: carry if there was no window for it
-;  Opens the file in a notepad of its own. The name is copied
-;  first, because opening a window swaps the caller's state out.
-; ------------------------------------------------------------
-SysOpenFile:
-                ld      de,SysOpenName
-                ld      b,NOTENAMEMAX
-SofCopy:
-                ld      a,(hl)
-                ld      (de),a
-                or      a
-                jr      z,SofNamed
-                inc     hl
-                inc     de
-                djnz    SofCopy
-                xor     a
-                ld      (de),a
-SofNamed:
-                call    StIdent
-                ld      (SysOpenBk),a
-                ld      a,APP_NOTE
-                call    WndOpen
-                ret     c
-                ld      a,(SysOpenBk)
-                call    StSelect
-                ld      hl,SysOpenName
-                call    NoteLoadAs
-                or      a
-                ret
-
-SysOpenBk:      defb    0
-SysOpenName:    defs    NOTENAMEMAX+1
 
 TxtFmTitle:     defb    "FILES",0
 TxtFmDelTitle:  defb    "DELETE",0

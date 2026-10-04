@@ -342,6 +342,7 @@ def main():
         failures += surface_checks()
         failures += filemgr_checks()
         failures += dialog_checks()
+        failures += loader_checks()
     else:
         print("no 48K ROM found, skipping the paint checks")
 
@@ -3052,6 +3053,204 @@ def filemgr_checks():
     else:
         print("  selecting RAM again brings the same list back")
     m.call("FmClose")
+    return failures
+
+
+def loader_checks():
+    """A loadable app, through the real loader.
+
+    The counter example is assembled by mkapp.py against api/zxdesk.inc
+    and nothing else, written to the RAM device through the storage
+    calls, and opened by name. The tape path is not here: it needs the
+    ROM loader and a tape signal.
+    """
+    import mkapi
+    import mkapp
+    failures = []
+    print("loadable apps:")
+
+    want = mkapi.render(mkapi.symbols("build/zxdesk.sym"))
+    if open("api/zxdesk.inc").read() != want:
+        failures.append("api/zxdesk.inc is stale, run ./mkapi.py")
+    else:
+        print("  api/zxdesk.inc matches this build")
+
+    data = mkapp.build("examples/counter/counter.asm")
+    n = int.from_bytes(data[4:6], "little")
+    r = int.from_bytes(data[6:8], "little")
+    print(f"  counter: {len(data)} bytes, image {n}, {r} relocations")
+    if len(data) > 256:
+        failures.append("the counter no longer fits a RAM device file")
+        return failures
+
+    BUF, NAME = 0x5B00, 0x5C10
+
+    def put(m, name, blob):
+        for i, ch in enumerate(name):
+            m.poke(NAME + i, ord(ch))
+        m.poke(NAME + len(name), 0)
+        for i, x in enumerate(blob):
+            m.poke(BUF + i, x)
+        m.m.hl, m.m.b = NAME, m.sym("FA_OVERWRITE")
+        m.call("StOpen")
+        h = m.m.a
+        m.m.a, m.m.hl, m.m.bc = h, BUF, len(blob)
+        m.call("StWrite")
+        m.m.a = h
+        m.call("StClose")
+
+    def run(m, name):
+        for i, ch in enumerate(name):
+            m.poke(NAME + i, ord(ch))
+        m.poke(NAME + len(name), 0)
+        m.m.hl = NAME
+        m.call("ApiOpenFile")
+        return m.m.a, m.m.f & 1
+
+    def shown(m):
+        x = m.peek(m.sym("WinX")) + 1 + 3
+        y = m.peek(m.sym("WinY")) + m.sym("WinCapH") + 4
+        return "".join(next((ch for ch in "0123456789"
+                             if m.font_glyph(ch) == m.glyph_at(x + i, y)), "?")
+                       for i in range(3))
+
+    def key(m, k):
+        m.m.b = m.sym(k)
+        m.call("HdlKey")
+
+    def heap_used(m):
+        at, used = m.sym("HeapBase"), 0
+        while at < m.sym("HEAPEND"):
+            size = m.peek16(at)
+            if m.peek(at + 2):
+                used += size
+            at += size + m.sym("HEAPHDR")
+        return used
+
+    m = boot(text="")
+    idle = heap_used(m)
+    put(m, "COUNTER", data)
+    before = m.peek(m.sym("WndCount"))
+    a, cy = run(m, "COUNTER")
+    base = m.peek16(m.sym("LdrBase"))
+    ext = m.sym("AppExt")
+    draw = int.from_bytes(data[8 + 6:8 + 8], "little")
+    if (a, cy) != (0, 0) or m.peek(m.sym("WndCount")) != before + 1:
+        failures.append("the app did not open a window")
+        print(f"  A {a}, carry {cy}")
+        return failures
+    if (m.peek16(m.sym("WinApp")) != ext
+            or m.peek16(ext + m.sym("APP_DRAW")) != base + draw):
+        failures.append("the descriptor was not relocated")
+    else:
+        print(f"  loaded at ${base:04X} in the heap, descriptor relocated, "
+              f"window open")
+    if shown(m) != "000":
+        failures.append(f"the counter drew {shown(m)!r}, not 000")
+    key(m, "KEY_UP")
+    key(m, "KEY_UP")
+    key(m, "KEY_UP")
+    key(m, "KEY_DOWN")
+    if shown(m) != "002":
+        failures.append(f"after up, up, up, down it shows {shown(m)!r}")
+    else:
+        print("  it draws 000, and up, up, up, down makes it 002")
+    key(m, "KEY_ENTER")
+    if shown(m) != "000":
+        failures.append("ENTER did not clear the count")
+
+    # a second load while the first is on screen
+    a, cy = run(m, "COUNTER")
+    if (a, cy) != (1, 0) or not m.peek(m.sym("DgDepth")):
+        failures.append("loading over a running app was not refused")
+    else:
+        print("  loading again while it runs is refused with an alert")
+    m.m.a = 13
+    m.call("PnlKey")
+    if m.peek(m.sym("DgDepth")):
+        failures.append("the alert did not close")
+
+    # closed, it stays loaded; loading again replaces it
+    m.call("WndClose")
+    if m.peek(m.sym("WndCount")) != before or not m.peek(m.sym("LdrLoaded")):
+        failures.append("closing the window went wrong")
+    a, cy = run(m, "COUNTER")
+    if (a, cy) != (0, 0) or shown(m) != "000":
+        failures.append("it would not load again after closing")
+    else:
+        print("  closed and loaded again, the old copy is freed first")
+    m.call("WndClose")
+
+    # files that must be refused, each leaving the heap as it was
+    newer = bytearray(data)
+    newer[3] = m.sym("API_VER") + 1
+    stray = bytearray(data)
+    stray[-2:] = (n - 1).to_bytes(2, "little")
+    short = bytes(data[:-3])
+    for label, blob in (("a newer interface", newer),
+                        ("a relocation outside the image", stray),
+                        ("a file cut short", short)):
+        m2 = boot(text="")
+        put(m2, "BAD", bytes(blob))
+        count = m2.peek(m2.sym("WndCount"))
+        a, cy = run(m2, "BAD")
+        if ((a, cy) != (1, 0) or m2.peek(m2.sym("WndCount")) != count
+                or heap_used(m2) != idle or m2.peek(m2.sym("LdrLoaded"))):
+            failures.append(f"{label} was not refused cleanly")
+            print(f"  {label}: A {a}, carry {cy}, heap {heap_used(m2)} "
+                  f"against {idle}")
+        else:
+            print(f"  {label} is refused with an alert and the heap is "
+                  f"as it was")
+
+    # a file that is not an app still opens in a notepad
+    m3 = boot(text="HELLO")
+    m3.call("NoteSave")
+    count = m3.peek(m3.sym("WndCount"))
+    a, cy = run(m3, "NOTE")
+    if ((a, cy) != (0, 0) or m3.peek(m3.sym("WndCount")) != count + 1
+            or m3.peek16(m3.sym("WinApp")) != m3.sym("AppNote")):
+        failures.append("a document no longer opens in a notepad")
+    else:
+        print("  a document still opens in a notepad")
+
+    # a 128K: read out of a bank, run in the heap
+    mb = Machine("build/zxdesk.bin", "build/zxdesk.sym", banked=True)
+    for rt in ("DetectMachine", "SetupIM2", "BuildScrTab", "MouseInit",
+               "JoyInit", "StInit", "SetLoad", "SetApply", "DskInit",
+               "InitScreen", "WndInit", "WinDraw", "WinGrab", "PtrSaveBg",
+               "PtrDraw"):
+        mb.call(rt)
+    put(mb, "COUNTER", data)
+    a, cy = run(mb, "COUNTER")
+    key(mb, "KEY_UP")
+    if (mb.peek(mb.sym("StBackend")) != mb.sym("ST_BANK") or (a, cy) != (0, 0)
+            or shown(mb) != "001"):
+        failures.append("the app does not load from a 128K bank")
+        print(f"  128K: A {a}, carry {cy}, shows {shown(mb)!r}")
+    else:
+        print("  on a 128K it loads from the bank device and runs the same")
+
+    # FILE, LOAD
+    m4 = boot(text="")
+    put(m4, "COUNTER", data)
+    m4.call("FmLoadPanel")
+    for k in list("COUNTER") + [4, 4, 13]:
+        m4.m.a = k if isinstance(k, int) else ord(k)
+        m4.call("PnlKey")
+    if (m4.peek16(m4.sym("WinApp")) != m4.sym("AppExt") or m4.peek(m4.sym("FmUp"))
+            or shown(m4) != "000"):
+        failures.append("FILE, LOAD did not run the app")
+    else:
+        print("  FILE, LOAD with the name typed runs it")
+    m4.call("FmLoadPanel")
+    for k in list("NOPE") + [4, 4, 13]:
+        m4.m.a = k if isinstance(k, int) else ord(k)
+        m4.call("PnlKey")
+    if not m4.peek(m4.sym("DgDepth")):
+        failures.append("FILE, LOAD of a missing name said nothing")
+    else:
+        print("  and a name that is not there gets COULD NOT LOAD")
     return failures
 
 

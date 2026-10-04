@@ -65,7 +65,7 @@ ApiWinPrintIf:  jp      WinPrintIf      ; 38 as 29, inverted if A is not 0
 ApiDlgAlert:    jp      DlgAlert        ; 39 HL = line, DE = second line or 0
 ApiDlgConfirm:  jp      DlgConfirm      ; 40 HL, DE, BC = callback, A = 1 yes
 ApiDlgSave3:    jp      DlgSave3        ; 41 HL, DE, BC = callback, A = 0 1 2
-ApiOpenFile:    jp      SysOpenFile     ; 42 HL = name. Carry if no window
+ApiOpenFile:    jp      SysOpenFile     ; 42 HL = name. Carry: nothing. A = 1: alert up
 ApiWinFill:     jp      WinFill         ; 43 B, C, D = rows, E = columns, HL
 ApiEnd:
 

@@ -20,7 +20,7 @@ MNITEMH         equ     8               ; pixel rows per item
 MenuDefs:
                 defb    1,8,10,2
                 defw    MnItems1
-                defb    10,6,8,6
+                defb    10,6,8,7
                 defw    MnItems2
                 defb    17,6,10,5
                 defw    MnItems3
@@ -36,6 +36,7 @@ MnItems2:       defb    "NEW",0
                 defb    "SAVE AS",0
                 defb    "PRINT",0
                 defb    "DELETE",0
+                defb    "LOAD",0
 ; VIEW held TIDY and REFRESH, which were drawn from the first build
 ; and never wired to anything. Two applications that exist is a better
 ; use of a menu than two words that do not.
@@ -324,6 +325,8 @@ MnActions:
                 defw    NotePrint               ; FILE, PRINT
                 defb    2,5
                 defw    FmDeletePanel           ; FILE, DELETE
+                defb    2,6
+                defw    FmLoadPanel             ; FILE, LOAD, an app file
                 defb    3,0
                 defw    ClockOpen               ; VIEW, CLOCK
                 defb    3,1

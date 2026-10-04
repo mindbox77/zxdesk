@@ -51,7 +51,8 @@ a lot of evenings. They're yours.
 | **Storage** | A registry of backends behind six vectors. RAM, tape (via the real ROM loader), and the 128K's spare banks as a RAM disk. [esxDOS](https://esxdos.org/) has a reserved id. |
 | **Memory** | A real heap with an owner byte, 8,111 bytes, allocating window buffers sized to their windows. |
 | **Applications** | A descriptor with init, event and paint, plus per instance state swapped in and out. Notepad, clock, calendar, commander, about. |
-| **Application interface** | A jump table at `$8000`, 33 slots, with slot n at `$8000 + 3n`. The clock and the calendar already draw through it and name no desktop global. |
+| **Application interface** | A jump table at `$8000`, 44 slots, with slot n at `$8000 + 3n`. The clock, the calendar, the notepad and the commander all work through it and name no desktop global. |
+| **Loadable apps** | An app is a file: a header, an image assembled at origin nought, and a relocation table. The desktop loads it into the heap from RAM, a 128K bank or tape and runs it in a window. See [Writing an app](#writing-an-app). |
 | **Persistence** | Settings written to storage with a magic byte and a version, and read back at boot. |
 
 Screenshots:
@@ -167,19 +168,21 @@ tables.
 
 ### The memory map
 
-    $6000-$7C47   the slow region: panels, the calendar, the file
-                  panels, the desktop setup, the commander
-    $7C48-$7FFF   free, 952 bytes, contended
-    $8000-$B41B   the fast region: everything else, starting with
+    $6000-$7E45   the slow region: panels, the calendar, the file
+                  panels, the desktop setup, the commander, the
+                  app loader
+    $7E46-$7FFF   free, 442 bytes, contended
+    $8000-$B47E   the fast region: everything else, starting with
                   the application interface's jump table
-    $B41C-$BCFF   free, 2,276 bytes
+    $B47F-$BCFF   free, 2,177 bytes
     $BD00         stack top
     $BDBD         interrupt handler
     $BE00-$BEFF   interrupt vector table
     $C000-$C63F   the RAM disk, its directory, and the tape buffer
     $C640-$C750   the live notepad state
     $C751-$DF50   four transient surfaces
-    $DF51-$FEFF   the heap, 8,111 bytes
+    $DF51-$FEFF   the heap, 8,111 bytes: window buffers, window
+                  state, and the loaded app
     $FF00-$FFFF   deliberately unused
 
 Two things in that map are worth explaining.
@@ -572,6 +575,75 @@ Three rules that earned their place:
 
 ---
 
+## Writing an app
+
+An app is assembled on its own, against one include, and loaded by the
+desktop at run time. Nothing in it knows an address inside the desktop
+except the jump table, which is why the table is append only.
+
+    ./build.sh && ./mkapi.py
+    ./mkapp.py examples/counter/counter.asm build/counter.zxa
+    ./mkapp.py examples/counter/counter.asm build/counter.zxa \
+        --tap build/zxdesk.tap COUNTER
+
+The first line writes `api/zxdesk.inc` from the build: the 44 slots,
+the key codes, the storage constants and the descriptor offsets. The
+second assembles the example. The third also appends it to the tape
+image, after the desktop, so FILE, LOAD with FROM set to TAPE finds it.
+In the commander, ENTER on an app file runs it and ENTER on anything
+else still opens it in a notepad.
+
+`examples/counter/counter.asm` is the whole of a working app in 139
+bytes. The shape is:
+
+                include "zxdesk.inc"
+                org     APPORG
+
+                defw    1               ; bytes of state per window
+                defw    Count           ; where it lives while in use
+                defw    Init, Draw, Key ; any of these may be nought
+                defw    Title
+                defb    10, 60, 12, 36  ; column, row, width, height
+                defw    0, 0, 0         ; close, scroll, scroll to
+
+The descriptor has to come first, because the loader copies the first
+22 bytes of the image and calls it the app. `Draw` paints inside the
+window with `ApiWinPrint`, where B is pixel rows below the title bar
+and C is columns in from the left border, so the app never asks where
+its window is. `Key` gets the key in A. To repaint after a key, lift
+the pointer, clear, draw, and hand the window back:
+
+                call    ApiPtrRestore
+                call    ApiWinClear
+                call    Draw
+                call    ApiWinGrab
+                call    ApiPtrSaveBg
+                jp      ApiPtrDraw
+
+**The file.** Eight bytes of header: `ZXA`, the interface version the
+app needs, the image length, the relocation count. Then the image,
+then one word per relocation, each the offset of a word in the image
+that holds an address. `mkapp.py` finds those by assembling at two
+origins and comparing, then assembles at a third to prove the list is
+complete, which also catches the one thing that can't be relocated: an
+instruction that takes half an address.
+
+**Where it lives.** In a heap block, relocated as it loads. A 48K has
+no spare address range to promise an app, and the heap is the only
+memory there is, so the app goes wherever the heap has room. On a 128K
+the spare banks are a place to load from rather than a place to run:
+they page in at `$C000`, which is where the heap and every window's
+state already sit.
+
+**The limits.** One app is loaded at a time. It stays loaded when its
+window closes, and loading another frees it. The size limit is the
+device's: 256 bytes from the RAM device, 511 from tape, 8,192 from a
+bank. A file asking for a newer interface than the desktop has, a
+relocation pointing outside the image and a file cut short are each
+refused with an alert, and the heap is left as it was.
+
+---
+
 ## What is not finished
 
 **esxDOS is written and passes.** For a long time it couldn't be,
@@ -620,6 +692,9 @@ build it blind on an emulator, so it waits until one arrives.
 
     build.sh, run.sh            assemble, and load onto the machine
     tstates.py, taplant.py      timing arithmetic, and tape block planting
+    mkapi.py, mkapp.py          write the app include, and assemble an app
+    api/zxdesk.inc              what an app is assembled against
+    examples/counter/           a worked app, built outside the desktop
 
     src/zxdesk.asm              the desktop
     src/damage.inc              damage rectangles and the narrow desktop fill
@@ -643,6 +718,7 @@ build it blind on an emulator, so it waits until one arrives.
     src/commander.inc           the two pane file manager
     src/desktop.inc             desktop shortcuts
     src/filemgr.inc             the file panels
+    src/loader.inc              loads an app file into the heap and runs it
     src/settings.inc            the settings record
     src/script.inc              scripted input, for end to end verification
     images/                     the screenshots above

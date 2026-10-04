@@ -61,6 +61,7 @@ APP_CLOCK       equ     2
 APP_CAL         equ     3
 APP_CMD         equ     4
 APP_KEYS        equ     5
+APP_EXT         equ     6       ; the loaded app, see loader.inc
 
 AppTable:
 AppNote:        defw    NOTESTSZ, NoteState, NoteInit, NoteDrawInterior
@@ -117,6 +118,8 @@ AppKeys:        defw    0, 0, 0, KeysDraw
                 defb    14, 20, KEYSW, KEYSH
                 defw    0
                 defw    0, 0
+                ; Filled in by the loader from the app's own file.
+AppExt:         defs    APPSIZE
 
 ; ------------------------------------------------------------
 ;  AppAt
