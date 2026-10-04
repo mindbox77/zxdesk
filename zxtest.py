@@ -391,6 +391,18 @@ def api_checks(m):
         ("ApiWinPrintInv", "WinPrintInv"),
         ("ApiWinClear", "WinClear"),
         ("ApiWinAddr", "WinAddr"),
+        # version 3
+        ("ApiWinRows", "WinRows"),
+        ("ApiWinCols", "WinCols"),
+        ("ApiWinApp", "WinAppGet"),
+        ("ApiWndCloseNow", "WndCloseNow"),
+        ("ApiKbdMods", "KbdModsGet"),
+        ("ApiWinPrintIf", "WinPrintIf"),
+        ("ApiDlgAlert", "DlgAlert"),
+        ("ApiDlgConfirm", "DlgConfirm"),
+        ("ApiDlgSave3", "DlgSave3"),
+        ("ApiOpenFile", "SysOpenFile"),
+        ("ApiWinFill", "WinFill"),
     ]
     bad = []
     for n, (slot, target) in enumerate(slots):

@@ -49,7 +49,7 @@ CmdActive:      defb    0               ; 0 left, 1 right
 ;  pane drawn twice.
 ; ------------------------------------------------------------
 CmdInit:
-                call    StIdent
+                call    ApiStIdent
                 ld      (CmdBk0),a
                 cp      ST_TAPE
                 ld      a,ST_TAPE
@@ -78,7 +78,7 @@ CmdUse:
                 jr      z,CmuGo
                 ld      a,(CmdBk1)
 CmuGo:
-                jp      StSelect
+                jp      ApiStSelect
 
 ; out: HL = the selected row byte of CmdPane's pane
 CmdSelAt:
@@ -91,8 +91,8 @@ CmdSelAt:
 
 ; out: A = how many rows of listing this window is tall
 CmdRows:
-                ld      a,(WinH)
-                sub     CMDLISTY+3
+                call    ApiWinRows
+                sub     CMDLISTY-WinCapH+2
                 jr      c,CmrOne
                 srl     a
                 srl     a
@@ -112,14 +112,14 @@ CmrOne:
 ; move in a listing of three.
 CmdCount:
                 call    CmdUse
-                call    StCaps
+                call    ApiStCaps
                 and     STCAP_DIR
                 jr      z,CmcNone
                 ld      b,0
 CmcLoop:
                 ld      a,b
                 push    bc
-                call    StDir
+                call    ApiStDir
                 pop     bc
                 jr      c,CmcDone
                 inc     b
@@ -140,13 +140,13 @@ CmcNone:
 ;  nought, which WndScrollInfo reads as no bar.
 ; ------------------------------------------------------------
 CmdScrollInfo:
-                ld      a,(StBackend)
+                call    ApiStIdent
                 ld      (CmdWasS),a
                 ld      a,(CmdActive)
                 call    CmdCount
                 ld      (CmdTotal),a
                 ld      a,(CmdWasS)
-                call    StSelect
+                call    ApiStSelect
                 call    CmdRows
                 ld      c,a
                 ld      a,(CmdTotal)
@@ -167,13 +167,13 @@ CmdScrollInfo:
 ; ------------------------------------------------------------
 CmdScrollTo:
                 ld      (CmdWant),a
-                ld      a,(StBackend)
+                call    ApiStIdent
                 ld      (CmdWasS),a
                 ld      a,(CmdActive)
                 call    CmdCount
                 ld      b,a
                 ld      a,(CmdWasS)
-                call    StSelect
+                call    ApiStSelect
                 ld      a,b
                 or      a
                 ret     z
@@ -203,14 +203,14 @@ CmdStSet:
 ; because a key ends by drawing and one cell would have the inner call
 ; overwriting what the outer one saved.
 CmdDraw:
-                ld      a,(StBackend)
+                call    ApiStIdent
                 ld      (CmdWasD),a
                 xor     a
                 call    CmdPane1
                 ld      a,1
                 call    CmdPane1
                 ld      a,(CmdWasD)
-                jp      StSelect
+                jp      ApiStSelect
 
 ; A = pane. Draws its header and its listing.
 CmdPane1:
@@ -218,18 +218,14 @@ CmdPane1:
                 ; where this pane starts
                 ld      a,(CmdPane)
                 or      a
-                ld      a,(WinX)
+                ld      a,0
                 jr      z,CmpLeft
-                add     a,CMDPANEW+2
+                ld      a,CMDPANEW+2
 CmpLeft:
-                inc     a
                 ld      (CmdCol),a
                 ; the header: the device, inverted when this is the pane
                 ; the keys are pointing at, because a one bit display has
                 ; one emphasis and this is what it is for
-                ld      a,(WinY)
-                add     a,CMDHEADY
-                ld      (PxRow),a
                 ld      a,(CmdCol)
                 ld      c,a
                 call    CmdDevName
@@ -241,10 +237,8 @@ CmpLeft:
                 jr      nz,CmpNotAct
                 inc     a
 CmpNotAct:
-                ld      (PrintInv),a
-                call    WinPrintClip
-                xor     a
-                ld      (PrintInv),a
+                ld      b,CMDHEADY-WinCapH
+                call    ApiWinPrintIf
                 ; and the files
                 call    CmdRows
                 ld      (CmdN),a
@@ -253,7 +247,7 @@ CmpNotAct:
 CmpRow:
                 ld      a,(CmdRow)
                 push    af
-                call    StDir
+                call    ApiStDir
                 jr      nc,CmpPaint             ; HL is the name
                 ; Nothing there. The first row of a device that cannot
                 ; enumerate says so, and every other empty row is blank:
@@ -263,7 +257,7 @@ CmpRow:
                 or      a
                 jr      nz,CmpPaint
                 push    hl
-                call    StCaps
+                call    ApiStCaps
                 and     STCAP_DIR
                 pop     hl
                 jr      nz,CmpPaint
@@ -275,11 +269,8 @@ CmpPaint:
                 add     a,a
                 add     a,a
                 add     a,a
-                ld      c,a
-                ld      a,(WinY)
-                add     a,CMDLISTY
-                add     a,c
-                ld      (PxRow),a
+                add     a,CMDLISTY-WinCapH
+                ld      (CmdPx),a
                 ; the row the keys are on, in the pane the keys are in
                 call    CmdSelAt
                 ld      a,(hl)
@@ -295,13 +286,14 @@ CmpPaint:
 CmpPlain:
                 xor     a
 CmpInv:
-                ld      (PrintInv),a
+                ld      d,a
+                ld      a,(CmdPx)
+                ld      b,a
                 ld      a,(CmdCol)
                 ld      c,a
                 ld      hl,(CmdName)
-                call    WinPrintClip
-                xor     a
-                ld      (PrintInv),a
+                ld      a,d
+                call    ApiWinPrintIf
                 ld      hl,CmdRow
                 inc     (hl)
                 ld      a,(hl)
@@ -312,7 +304,7 @@ CmpInv:
 
 ; out: HL = the name of CmdPane's device
 CmdDevName:
-                call    StIdent
+                call    ApiStIdent
                 cp      ST_TAPE
                 ld      hl,TxtCmdTape
                 ret     z
@@ -334,7 +326,7 @@ CmdDevName:
 ; ------------------------------------------------------------
 CmdKey:
                 ld      (CmdKeyCh),a
-                ld      a,(StBackend)
+                call    ApiStIdent
                 ld      (CmdWasK),a
                 ld      a,(CmdKeyCh)
                 cp      KEY_UP
@@ -391,16 +383,16 @@ CmkNotC:
 
 CmdRepaint:
                 ld      a,(CmdWasK)
-                call    StSelect
-                call    PtrRestore
+                call    ApiStSelect
+                call    ApiPtrRestore
                 call    ApiWinClear
                 call    CmdDraw
-                call    WndScrollBar            ; the interior was repainted
+                call    ApiWndBar            ; the interior was repainted
                                                 ; without WinDraw, so the
                                                 ; chrome it cleared goes back
-                call    WinGrab
-                call    PtrSaveBg
-                jp      PtrDraw
+                call    ApiWinGrab
+                call    ApiPtrSaveBg
+                jp      ApiPtrDraw
 
 ; ------------------------------------------------------------
 ;  The selected file's name, into CmdWork
@@ -412,7 +404,7 @@ CmdPicked:
                 call    CmdUse
                 call    CmdSelAt
                 ld      a,(hl)
-                call    StDir
+                call    ApiStDir
                 ret     c
                 ld      de,CmdWork
                 ld      b,12
@@ -440,23 +432,13 @@ CmpkDone:
 CmdOpen:
                 call    CmdPicked
                 jr      c,CmdRepaint
-                ; The name and the device are both put somewhere that is not
-                ; the instance state, because opening the window swaps this
-                ; application's state out for the notepad's and CmdActive
-                ; stops meaning anything the moment it does.
-                call    StIdent
-                ld      (CmdSrcBk),a
-                ld      a,APP_NOTE
-                call    WndOpen
+                ld      hl,CmdWork
+                call    ApiOpenFile
                 jr      c,CmdRepaint            ; no room, and the commander
                                                 ; is still live to say so
-                ld      a,(CmdSrcBk)
-                call    StSelect
-                ld      hl,CmdWork
-                call    NoteLoadAs
                 ld      a,(CmdWasK)
-                call    StSelect
-                jp      WndRepaintAll
+                call    ApiStSelect
+                jp      ApiWndRepaint
 
 ; ------------------------------------------------------------
 ;  CmdCopy
@@ -471,29 +453,29 @@ CmdCopy:
                 call    CmdUse
                 ld      hl,CmdWork
                 ld      b,FA_READ
-                call    StOpen
+                call    ApiStOpen
                 ret     c
                 ld      (CmdHandle),a
                 ld      hl,CmdBuf
                 ld      bc,CMDBUFSZ
-                call    StRead
+                call    ApiStRead
                 ld      (CmdGot),bc
                 ld      a,(CmdHandle)
-                call    StClose
+                call    ApiStClose
                 ; the other pane
                 ld      a,(CmdActive)
                 xor     1
                 call    CmdUse
                 ld      hl,CmdWork
                 ld      b,FA_OVERWRITE
-                call    StOpen
+                call    ApiStOpen
                 ret     c
                 ld      (CmdHandle),a
                 ld      hl,CmdBuf
                 ld      bc,(CmdGot)
-                call    StWrite
+                call    ApiStWrite
                 ld      a,(CmdHandle)
-                jp      StClose
+                jp      ApiStClose
 
 CmdDelete:
                 call    CmdPicked
@@ -501,7 +483,7 @@ CmdDelete:
                 ld      a,(CmdActive)
                 call    CmdUse
                 ld      hl,CmdWork
-                call    StDelete
+                call    ApiStDelete
                 ; the row may now be past the end of a shorter listing
                 ld      a,(CmdActive)
                 call    CmdCount
@@ -529,12 +511,12 @@ TxtCmdBlank:    defb    " ",0
 
 CmdPane:        defb    0
 CmdCol:         defb    0
+CmdPx:          defb    0
 CmdRow:         defb    0
 CmdN:           defb    0
 CmdName:        defw    0
 CmdWasD:        defb    0
 CmdWasK:        defb    0
-CmdSrcBk:       defb    0
 CmdKeyCh:       defb    0
 CmdWasS:        defb    0
 CmdTotal:       defb    0

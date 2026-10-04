@@ -345,6 +345,42 @@ FMFIELDLEN      equ     10              ; a tape name. B3 widened the panel
                                         ; so this is the length a name is
                                         ; rather than the length that fitted
 
+; ------------------------------------------------------------
+;  SysOpenFile
+;  in:  HL = a name on the selected backend
+;  out: carry if there was no window for it
+;  Opens the file in a notepad of its own. The name is copied
+;  first, because opening a window swaps the caller's state out.
+; ------------------------------------------------------------
+SysOpenFile:
+                ld      de,SysOpenName
+                ld      b,NOTENAMEMAX
+SofCopy:
+                ld      a,(hl)
+                ld      (de),a
+                or      a
+                jr      z,SofNamed
+                inc     hl
+                inc     de
+                djnz    SofCopy
+                xor     a
+                ld      (de),a
+SofNamed:
+                call    StIdent
+                ld      (SysOpenBk),a
+                ld      a,APP_NOTE
+                call    WndOpen
+                ret     c
+                ld      a,(SysOpenBk)
+                call    StSelect
+                ld      hl,SysOpenName
+                call    NoteLoadAs
+                or      a
+                ret
+
+SysOpenBk:      defb    0
+SysOpenName:    defs    NOTENAMEMAX+1
+
 TxtFmTitle:     defb    "FILES",0
 TxtFmDelTitle:  defb    "DELETE",0
 TxtFmDelAsk:    defb    "DELETE FILE?",0

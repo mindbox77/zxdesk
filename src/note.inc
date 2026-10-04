@@ -95,7 +95,8 @@ NoteCurAddr:
                 ld      a,(NoteCY)
                 jp      NoteRowAddr
 
-; A = document row. Returns A = the pixel row of that line's top, and
+; A = document row. Returns A = that line's top, in rows below the
+; title bar, and
 ; carry set if the row is not on screen at all. Every painter checks
 ; the carry, so a document longer than its window cannot paint outside
 ; it: that is the whole of what scrolling has to be careful about.
@@ -116,10 +117,7 @@ NoteRowPx:
                 add     a,a
                 add     a,a
                 add     a,a                     ; *8
-                ld      c,a
-                ld      a,(WinY)
-                add     a,NOTETOP
-                add     a,c
+                add     a,NOTETOP-WinCapH
                 or      a                       ; and no carry: it is visible
                 ret
 
@@ -133,9 +131,9 @@ NoteRowPx:
 ; ------------------------------------------------------------
 ; out: A = visible text rows, at least one and at most the document
 NoteVisRows:
-                ld      a,(WinH)
-                sub     NOTETOP+3               ; the cap, the inset and the
-                                                ; bottom border
+                call    ApiWinRows
+                sub     NOTETOP-WinCapH+2       ; the inset, and the gap above
+                                                ; the bottom border
                 jr      c,NvrOne
                 srl     a                       ; /8, and SRL rather than RRA
                 srl     a                       ; because RRA rotates bit 0
@@ -185,12 +183,9 @@ NsSame:
                 xor     a
                 ret
 
-; Returns C = the byte column of text column A.
+; Returns C = text column A, in columns from the left border.
 NoteColByte:
-                ld      c,a
-                ld      a,(WinX)
-                add     a,NOTEIND
-                add     a,c
+                add     a,NOTEIND-1
                 ld      c,a
                 ret
 
@@ -209,14 +204,14 @@ NoteDrawLine:
                 push    af
                 call    NoteRowPx
                 jr      c,NdlOff
-                ld      (PxRow),a
+                ld      b,a
                 xor     a
                 call    NoteColByte
                 pop     af
+                push    bc
                 call    NoteRowAddr
-                xor     a
-                ld      (PrintInv),a
-                jp      WinPrintClip
+                pop     bc
+                jp      ApiWinPrint
 NdlOff:
                 pop     af
                 ret
@@ -322,9 +317,11 @@ NdaDone:
 NoteCurErase:
                 ld      a,(NoteCY)
                 call    NoteRowPx
-                ld      (PxRow),a
+                ret     c                       ; scrolled out of view
+                ld      b,a
                 ld      a,(NoteCX)
                 call    NoteColByte
+                push    bc
                 call    NoteCurAddr
                 ld      a,(NoteCX)
                 ld      e,a
@@ -332,10 +329,9 @@ NoteCurErase:
                 add     hl,de
                 ld      a,(hl)
                 ld      (NoteCell),a
+                pop     bc
                 ld      hl,NoteCell
-                xor     a
-                ld      (PrintInv),a
-                jp      PrintStrPx2
+                jp      ApiWinPrint
 
 ; Draw the cursor: an inverted cell reporting the shift state. No
 ; shift knocks out the character underneath, CAPS shows a C and
@@ -344,9 +340,11 @@ NoteCurErase:
 NoteCurDraw:
                 ld      a,(NoteCY)
                 call    NoteRowPx
-                ld      (PxRow),a
+                ret     c                       ; scrolled out of view
+                ld      b,a
                 ld      a,(NoteCX)
                 call    NoteColByte
+                push    bc
                 call    NoteCurAddr
                 ld      a,(NoteCX)
                 ld      e,a
@@ -354,7 +352,7 @@ NoteCurDraw:
                 add     hl,de
                 ld      a,(hl)
                 ld      (NoteCell),a
-                ld      a,(KbdModState)
+                call    ApiKbdMods
                 bit     1,a
                 jr      nz,NcdSym
                 bit     0,a
@@ -368,13 +366,9 @@ NcdSym:
                 ld      a,'S'
                 ld      (NoteCell),a
 NcdGo:
+                pop     bc
                 ld      hl,NoteCell
-                ld      a,1
-                ld      (PrintInv),a
-                call    PrintStrPx2
-                xor     a
-                ld      (PrintInv),a
-                ret
+                jp      ApiWinPrintInv
 
 NoteCell:       defb    ' ',0
 
@@ -847,7 +841,7 @@ NkpNoText:
                 ; repaints the interior without going through WinDraw and
                 ; the clear has just wiped it. An application that
                 ; repaints its own interior owes the frame its chrome back.
-                jp      WndScrollBar
+                jp      ApiWndBar
 
 ; ------------------------------------------------------------
 ;  Keeping the window buffer honest
@@ -870,7 +864,7 @@ NoteSync:
                 ret     z
                 xor     a
                 ld      (NoteDirty),a
-                jp      WinGrab
+                jp      ApiWinGrab
 
 ; ------------------------------------------------------------
 ;  Storage
@@ -889,15 +883,15 @@ NoteSaveAs:
                 call    NoteSetName
                 ld      hl,NoteName
                 ld      b,FA_OVERWRITE
-                call    StOpen
+                call    ApiStOpen
                 ret     c
                 ld      (NoteHandle),a
                 ld      hl,NoteBuf
                 ld      bc,NOTESIZE
-                call    StWrite
+                call    ApiStWrite
                 ld      (NoteGot),bc
                 ld      a,(NoteHandle)
-                call    StClose
+                call    ApiStClose
                 ld      hl,(NoteGot)
                 ld      de,NOTESIZE
                 or      a
@@ -917,15 +911,15 @@ NoteLoadAs:
                 call    NoteSetName
                 ld      hl,NoteName
                 ld      b,FA_READ
-                call    StOpen
+                call    ApiStOpen
                 jr      c,NlFail
                 ld      (NoteHandle),a
                 ld      hl,NoteBuf
                 ld      bc,NOTESIZE
-                call    StRead
+                call    ApiStRead
                 ld      (NoteGot),bc
                 ld      a,(NoteHandle)
-                call    StClose
+                call    ApiStClose
                 ld      hl,(NoteGot)
                 ld      de,NOTESIZE
                 or      a
@@ -1016,7 +1010,7 @@ NsanOk:
 ; you get by opening one and closing the other.
 NoteMenuNew:
                 ld      a,APP_NOTE
-                jp      WndOpen
+                jp      ApiWndOpen
 
 ; ------------------------------------------------------------
 ;  NoteScrollInfo
@@ -1073,14 +1067,14 @@ NstTop:
                 ; on where the cursor is: scrolling up moved the cursor up
                 ; and then the bottom was no longer reachable.
 NstPaint:
-                call    PtrRestore
+                call    ApiPtrRestore
                 call    ApiWinClear
                 call    NoteDrawAll
                 call    NoteCurDraw
-                call    WndScrollBar
-                call    WinGrab
-                call    PtrSaveBg
-                jp      PtrDraw
+                call    ApiWndBar
+                call    ApiWinGrab
+                call    ApiPtrSaveBg
+                jp      ApiPtrDraw
 
 ; ------------------------------------------------------------
 ;  NotePrint
@@ -1103,14 +1097,14 @@ NstPaint:
 NotePrint:
                 call    NoteIsFront
                 ret     nz
-                ld      a,(StBackend)           ; put back whatever was
+                call    ApiStIdent              ; put back whatever was
                 ld      (NotePrtWas),a          ; selected, the same way the
                 ld      a,ST_PRINT              ; commander does
-                call    StSelect
+                call    ApiStSelect
                 ret     c
                 ld      hl,NoteName
                 ld      b,FA_OVERWRITE
-                call    StOpen
+                call    ApiStOpen
                 jr      c,NotePrtFail
                 ld      (NoteHandle),a
                 ; the last row with anything on it
@@ -1143,7 +1137,7 @@ NprRow:
                 ld      a,(NoteRowIx)
                 call    NoteRowAddr
                 ld      a,(NoteHandle)          ; the handle goes in A and
-                call    StWrite                 ; everything between the open
+                call    ApiStWrite                 ; everything between the open
                                                 ; and here destroys it
 NprNoText:
                 ld      a,(NoteRowIx)
@@ -1159,16 +1153,16 @@ NprNoText:
                 ld      hl,NotePrtEol
                 ld      bc,1
                 ld      a,(NoteHandle)
-                call    StWrite
+                call    ApiStWrite
                 ld      hl,NoteRowIx
                 inc     (hl)
                 jr      NprRow
 NprDone:
                 ld      a,(NoteHandle)
-                call    StClose
+                call    ApiStClose
 NotePrtFail:
                 ld      a,(NotePrtWas)
-                jp      StSelect
+                jp      ApiStSelect
 
 NotePrtEol:     defb    KEY_ENTER
 NoteWantTop:    defb    0
@@ -1192,7 +1186,7 @@ NoteClose:
                 ld      hl,NoteName             ; which document, by name,
                 ld      de,TxtNoteLose          ; because two notepads can be
                 ld      bc,NoteCloseAnswer      ; open and only one is going
-                call    DlgSave3
+                call    ApiDlgSave3
                 scf
                 ret
 
@@ -1204,9 +1198,7 @@ NoteCloseAnswer:
                 cp      2
                 jr      z,NcaSave
 NcaGo:
-                ld      a,1
-                ld      (WndForce),a
-                jp      WndClose
+                jp      ApiWndCloseNow
 NcaSave:
                 call    NoteSave
                 jr      nc,NcaGo
@@ -1214,7 +1206,7 @@ NcaSave:
                 ; throw the work away having just been told to keep it.
                 ld      hl,TxtNoteNoSave
                 ld      de,0
-                jp      DlgAlert
+                jp      ApiDlgAlert
 
 TxtNoteLose:    defb    "UNSAVED WORK",0   ; DGW is 14 columns
 TxtNoteNoSave:  defb    "COULD NOT SAVE",0
@@ -1224,7 +1216,7 @@ TxtNoteNoSave:  defb    "COULD NOT SAVE",0
 ; test is the descriptor the window already carries, so there is no
 ; second copy of "which application is this" to go stale.
 NoteIsFront:
-                ld      hl,(WinApp)
+                call    ApiWinApp
                 ld      de,AppNote
                 or      a
                 sbc     hl,de
@@ -1241,14 +1233,14 @@ NmsOk:
                 ret
 
 NoteRefresh:
-                call    PtrRestore
+                call    ApiPtrRestore
                 call    NoteDrawAll
                 call    NoteCurDraw
-                call    WinGrab
+                call    ApiWinGrab
                 xor     a
                 ld      (NoteDirty),a
-                call    PtrSaveBg
-                jp      PtrDraw
+                call    ApiPtrSaveBg
+                jp      ApiPtrDraw
 
 ; Scratch, all of it. Each is written and read inside one call, so a
 ; second notepad shares these the way it shares the registers.

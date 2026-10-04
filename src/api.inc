@@ -4,7 +4,7 @@
 ;  Slot 0 is the cold start. Order is append only.
 ;  API_VER goes up when a slot is added.
 ; ============================================================
-API_VER         equ     2
+API_VER         equ     3
 
                 ; slot 0 is Main, in zxdesk.asm
 ApiVersion:     jp      ApiVerGet       ; 1  out: A = API_VER, B = slots
@@ -54,6 +54,19 @@ ApiWinPrint:    jp      WinPrint        ; 29 B, C, HL = string. Clipped
 ApiWinPrintInv: jp      WinPrintInv     ; 30 the same, inverted
 ApiWinClear:    jp      WinClear        ; 31 blank the interior
 ApiWinAddr:     jp      WinAddr         ; 32 B, C -> HL = screen address
+
+                ; version 3: what the notepad and the commander needed
+ApiWinRows:     jp      WinRows         ; 33 -> A = rows inside the window
+ApiWinCols:     jp      WinCols         ; 34 -> A = columns inside it
+ApiWinApp:      jp      WinAppGet       ; 35 -> HL = the live window's descriptor
+ApiWndCloseNow: jp      WndCloseNow     ; 36 close the front window, unasked
+ApiKbdMods:     jp      KbdModsGet      ; 37 -> A: bit 0 CAPS, bit 1 SYMBOL
+ApiWinPrintIf:  jp      WinPrintIf      ; 38 as 29, inverted if A is not 0
+ApiDlgAlert:    jp      DlgAlert        ; 39 HL = line, DE = second line or 0
+ApiDlgConfirm:  jp      DlgConfirm      ; 40 HL, DE, BC = callback, A = 1 yes
+ApiDlgSave3:    jp      DlgSave3        ; 41 HL, DE, BC = callback, A = 0 1 2
+ApiOpenFile:    jp      SysOpenFile     ; 42 HL = name. Carry if no window
+ApiWinFill:     jp      WinFill         ; 43 B, C, D = rows, E = columns, HL
 ApiEnd:
 
 API_SLOTS       equ     (ApiEnd-Main)/3
@@ -115,3 +128,50 @@ WinAddr:
                 add     a,WinCapH
                 add     a,b
                 jp      AddrAt
+
+; Rows between the title bar and the bottom border, and columns
+; between the side borders. Both keep every register but AF.
+WinRows:
+                ld      a,(WinH)
+                sub     WinCapH+1
+                ret
+
+WinCols:
+                ld      a,(WinW)
+                sub     2
+                ret
+
+WinAppGet:
+                ld      hl,(WinApp)
+                ret
+
+WndCloseNow:
+                ld      a,1
+                ld      (WndForce),a
+                jp      WndClose
+
+KbdModsGet:
+                ld      a,(KbdModState)
+                ret
+
+WinPrintIf:
+                or      a
+                jp      z,WinPrint
+                jp      WinPrintInv
+
+; The caller keeps the rectangle inside the window.
+WinFill:
+                ld      (FrPat),hl
+                ld      a,(WinX)
+                inc     a
+                add     a,c
+                ld      (FrX),a
+                ld      a,(WinY)
+                add     a,WinCapH
+                add     a,b
+                ld      (FrY),a
+                ld      a,e
+                ld      (FrW),a
+                ld      a,d
+                ld      (FrH),a
+                jp      DevFillRect
