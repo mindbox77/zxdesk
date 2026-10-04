@@ -576,6 +576,95 @@ Three rules that earned their place:
 
 ---
 
+## Loading apps
+
+An app is a file, and the desktop will run one from anywhere it can
+read a file: the RAM device, a 128K's bank device, or tape. There are
+three ways in.
+
+**From the commander.** FILE, OPEN, or the FILES icon, opens the two
+pane commander. Move to a file and press ENTER. If it is an app it
+runs in a window of its own; if it is anything else it opens in a
+notepad, as it always did. The desktop tells the two apart by the
+first three bytes of the file, so there is no extension to get wrong.
+
+**By name.** FILE, LOAD asks for a name and where to look. FROM is
+DISK for the current device or TAPE. LOAD runs it and EXIT closes the
+panel. This is the quick way when you know what the tape holds.
+
+**Importing a tape.** A tape has no directory. The only way to find
+out what is on one is to play it, so the commander doesn't list a tape,
+it reads from it. With a tape pane showing:
+
+| Key | |
+|---|---|
+| R | Reads the next file on the tape into the other pane's device. |
+| A | Reads every file, one after another. |
+
+After that they are ordinary files in the other pane, and ENTER runs
+them. A stops when the first name comes round again, which is how it
+knows a looping tape has been heard once. On a tape that simply ends,
+it stops when you press SPACE.
+
+Three things about tape are worth knowing before they surprise you.
+
+The tape only plays forward. Asking by name for a file the tape has
+already passed means waiting for one that isn't coming, which is the
+same thing `LOAD ""` does on a bare Spectrum. While any tape read is
+under way the status row says `READING TAPE. SPACE TO STOP.`, and SPACE
+does stop it and give the desktop back.
+
+A named load passes over other files on the way. Ask for the third file
+on a tape and it reads past the first two, about thirty blocks at
+most, before giving up.
+
+The last file read stays in the tape buffer, and the tape pane lists
+it. ENTER on it there runs it straight from the buffer without touching
+the tape. That matters on a 48K, where a RAM device file is 256 bytes:
+an app bigger than that can't be imported, so A refuses it whole and
+says so, but it is still in the buffer and still runs from the tape
+pane.
+
+**What fits where.**
+
+| | File size limit | Files |
+|---|---|---|
+| RAM device, 48K | 256 bytes | 4 |
+| Bank device, 128K | 8,192 bytes | 8 |
+| Tape | 511 bytes | as many as the tape holds |
+
+Both the RAM and the bank device are memory, so what is imported is
+gone when the machine is switched off. The tape is the copy that lasts.
+
+**What can run at once.** Three loaded apps, each in its own window,
+beside the built in ones up to the desktop's four windows. Loading the
+same file twice gives two copies with separate state. Closing an app's
+window doesn't free its memory at once; the next load does.
+
+**When it won't load.** Each of these gets an alert and leaves memory
+as it was:
+
+| Alert | Meaning |
+|---|---|
+| `COULD NOT LOAD` | No file of that name, or it isn't an app. |
+| `NEEDS NEW DESK` | The app was built for a newer interface than this desktop has. |
+| `BAD APP FILE` | The file is cut short or its relocation table points outside it. |
+| `NO ROOM` | Not enough heap, or no window free. |
+| `CLOSE AN APP` | Three are loaded and all three are on screen. |
+| `DOES NOT FIT` | An import was too big for the device. The name is on the second line. |
+
+**Putting an app on a tape.** `mkapp.py` appends one to a tape image as
+an ordinary header and data block, the same as `SAVE "name" CODE`
+writes, so it works in an emulator and on a real cassette alike:
+
+    ./mkapp.py examples/counter/counter.asm build/counter.zxa \
+        --tap build/zxdesk.tap COUNTER
+
+Put the apps after the desktop on the tape. The desktop loads first,
+leaves the tape where it stopped, and the apps are what comes next.
+
+---
+
 ## Writing an app
 
 An app is assembled on its own, against one include, and loaded by the
@@ -591,17 +680,7 @@ The first line writes `api/zxdesk.inc` from the build: the 45 slots,
 the key codes, the storage constants and the descriptor offsets. The
 second assembles the example. The third also appends it to the tape
 image, after the desktop, so FILE, LOAD with FROM set to TAPE finds it.
-In the commander, ENTER on an app file runs it and ENTER on anything
-else still opens it in a notepad.
-
-A tape has no directory, so the commander imports from it instead. With
-a tape pane showing, R reads the next file on the tape into the other
-pane's device and A reads them all, stopping when the first name comes
-round again, the tape runs out or SPACE is held. After that they are
-ordinary files in the listing. A file too big for the device is refused
-whole, with an alert, but the tape pane lists the file the tape buffer
-still holds, and ENTER there runs it without going back to the tape.
-A tape that has run out is waited on, as a Spectrum does, until SPACE.
+How a user then gets it running is in [Loading apps](#loading-apps).
 
 There are three examples, each the whole of a working app:
 
