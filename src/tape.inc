@@ -121,7 +121,7 @@ TapnCopy:
 ; data block into the buffer. Carry set means the tape ran out or
 ; the block was corrupt.
 TapeLoad:
-IFNDEF BENCH
+IFNDEF NOEXTRAS
                 ; The ROM waits on a silent tape for ever, with the desktop
                 ; stopped. Say how to end it before it starts.
                 ld      hl,TxtTapeWait
@@ -140,6 +140,8 @@ ENDIF
                 di
                 ld      a,TAPETRIES
                 ld      (TapeTries),a
+                xor     a
+                ld      (TapeBrk),a
 TaplSeek:
                 ld      hl,TapeTries
                 dec     (hl)
@@ -148,12 +150,12 @@ TaplSeek:
                 ld      de,TAPEHDR
                 xor     a                       ; $00: a header block
                 scf                             ; load rather than verify
-                call    LD_BYTES
+                ld      hl,LD_BYTES
+                call    TapeRom
                 jr      c,TaplHdr
-                ld      a,$7F                   ; not a header. SPACE gives
-                in      a,($FE)                 ; up; anything else was a
-                rra                             ; block to pass over
-                jr      nc,TaplFail
+                ld      a,(TapeBrk)             ; not a header. SPACE gives
+                or      a                       ; up; anything else was a
+                jr      nz,TaplFail             ; block to pass over
                 jr      TaplSeek
 TaplHdr:
                 ld      a,(TapeAny)
@@ -191,7 +193,8 @@ TaplTake:
                 ld      ix,TAPEBUF
                 ld      a,$FF                   ; $FF: a data block
                 scf
-                call    LD_BYTES
+                ld      hl,LD_BYTES
+                call    TapeRom
                 jr      nc,TaplFail
                 ; the name it had, without the padding, for TapeDirEnt
                 ld      hl,TapeIn+1
@@ -312,14 +315,51 @@ TapeClose:
                 ld      ix,TapeHdr
                 ld      de,TAPEHDR
                 xor     a                       ; header block
-                call    SA_BYTES
+                ld      hl,SA_BYTES
+                call    TapeRom
                 ld      ix,TAPEBUF
                 ld      de,(TapeLen)
                 ld      a,$FF                   ; data block
-                call    SA_BYTES
+                ld      hl,SA_BYTES
+                call    TapeRom
                 ei
                 or      a
                 ret
+
+; ------------------------------------------------------------
+;  TapeRom
+;  in:  HL = LD_BYTES or SA_BYTES, the other registers as the
+;       ROM wants them
+;  out: as the ROM leaves them, or carry clear and TapeBrk set
+;       if SPACE was pressed
+;  With SPACE down the ROM does not return. It raises BASIC's
+;  error D, BREAK, and leaves through the address ERR_SP points
+;  at. So that address is made ours for the length of the call.
+; ------------------------------------------------------------
+ERR_SP          equ     $5C3D
+
+TapeRom:
+                ld      (TapeVec+1),hl
+                ld      hl,(ERR_SP)
+                push    hl
+                ld      hl,TapeBroke
+                push    hl
+                ld      (ERR_SP),sp
+TapeVec:
+                call    0
+                pop     hl                      ; TapeBroke, not needed
+TapeRomOut:
+                pop     hl
+                ld      (ERR_SP),hl
+                ret
+TapeBroke:
+                ld      a,1
+                ld      (TapeBrk),a
+                ld      (iy+0),$FF              ; ERR_NR: nothing to report
+                or      a
+                jr      TapeRomOut
+
+TapeBrk:        defb    0
 
 ; A = n. The one name a tape can give: the file it last read.
 TapeDirEnt:
@@ -341,7 +381,7 @@ ELSE
 TAPETRIES       equ     32
 ENDIF
 
-IFNDEF BENCH
+IFNDEF NOEXTRAS
 TxtTapeWait:    defb    "READING TAPE. SPACE TO STOP.    ",0
 ENDIF
 TapeAny:        defb    0

@@ -3534,20 +3534,46 @@ def tape_import_checks():
         print(f"  A reads them all and stops when the first comes round "
               f"again: {got}")
 
-    # an empty tape ends rather than hanging, and so does SPACE
+    # a tape trap with nothing left ends rather than hanging
     m = commander()
     key(m, "A", [])
     tries = m.peek(m.sym("TapeTries"))
-    m.keys[0x7F] = 0xFE
-    key(m, "R", [])
-    held = m.peek(m.sym("TapeTries"))
-    m.keys.pop(0x7F)
-    if files(m) or tries != 0 or held != m.sym("TAPETRIES") - 1:
+    if files(m) or tries != 0:
         failures.append("a tape with nothing on it is not given up on")
-        print(f"  tries left {tries}, with SPACE held {held}")
+        print(f"  tries left {tries}")
     else:
-        print(f"  a silent tape is given up on after {m.sym('TAPETRIES') - 1} "
-              f"tries, and at once with SPACE held")
+        print(f"  a tape trap with nothing to give is given up on after "
+              f"{m.sym('TAPETRIES') - 1} tries")
+
+    # SPACE against the real ROM loader, with no trap in the way. The
+    # ROM does not return from that: it raises BASIC's error D.
+    m = commander()
+    m.poke16(0x5C3D, 0x5BF0)                # ERR_SP, as BASIC would have it
+    m.poke(0x5C3A, 0xFF)
+    m.keys[0x7F] = 0xFE
+    m.m.b = ord("R")
+    # Bounded by hand: without the fix this never comes back, and
+    # Machine.call would wait for ever on a CPU that does not halt.
+    m.poke(SENTINEL, 0x76)
+    m.m.sp = STACK - 2
+    m.poke16(m.m.sp, SENTINEL)
+    m.m.pc = m.sym("HdlKey")
+    for _ in range(60):
+        m.m.ticks_to_stop = 50_000
+        m.m.run()
+        if m.m.halted:
+            break
+    back = m.m.halted and m.m.pc in (SENTINEL, SENTINEL + 1)
+    m.m.halted = False
+    m.m.ticks_to_stop = 0
+    m.keys.pop(0x7F)
+    if (not back or not m.peek(m.sym("TapeBrk")) or files(m)
+            or m.peek16(0x5C3D) != 0x5BF0 or m.peek(0x5C3A) != 0xFF):
+        failures.append("SPACE during a tape read does not come back")
+        print(f"  returned {back}, ERR_SP ${m.peek16(0x5C3D):04X}")
+    else:
+        print("  SPACE during a read on the real ROM comes back to the "
+              "desktop, with BASIC's error pointer put back")
 
     # too big for the device: refused whole, with an alert
     m = commander()
