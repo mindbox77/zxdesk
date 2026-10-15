@@ -143,6 +143,9 @@ HdlKey:
                 ; separate variable. The about window has nothing to type
                 ; into, so it drops it rather than passing it to a notepad
                 ; that is behind something.
+                ld      a,(WndCount)
+                or      a
+                ret     z                       ; nothing to type into
                 push    bc
                 ld      a,(WndZ)
                 call    WndSelect

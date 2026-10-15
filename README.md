@@ -44,7 +44,7 @@ a lot of evenings. They're yours.
 
 | | |
 |---|---|
-| **Windows** | Overlapping, z ordered, movable, resizable, with title bar, close box and grip. Focus is the front of the z order, so raising and focusing are one action. |
+| **Windows** | Overlapping, z ordered, movable, resizable, with title bar, close box and grip. Focus is the front of the z order, so raising and focusing are one action. Every window closes, the last one too; the desktop shortcuts open them again. |
 | **Menus** | A permanent menu bar with pull downs, save under, and hit testing. |
 | **Input** | Kempston mouse, Kempston joystick, and the full keyboard matrix decoded across three tables with repeat. All of it arrives as events. |
 | **Events** | A sixteen slot ring. The main loop contains no window specific code. |

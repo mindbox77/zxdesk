@@ -350,6 +350,7 @@ def main():
         failures += desktop_checks()
         failures += commander_checks()
         failures += arrange_checks()
+        failures += last_window_checks()
         failures += shortcut_checks()
         failures += printer_checks()
         failures += scrollbar_checks()
@@ -1518,6 +1519,64 @@ def shortcut_checks():
         failures.append("a shortcut works while a dialogue is up")
     else:
         print("  and a dialogue swallows them, so a modal panel stays modal")
+    return failures
+
+
+def last_window_checks():
+    """The last window closes, and an empty desktop is a state that holds.
+
+    WndClose used to refuse the last window, because nothing could open
+    the notepad again. The shortcuts can now, so it closes, and nought
+    is a window count everything that walks the z order has to survive.
+    Three of them would not have: the z order shift and the repaint are
+    DJNZ loops on the count, which from nought run 256 times, and
+    cascade's tidy up loads the table's copy of the live window, which
+    would bring a closed window's owner back to life over freed blocks.
+    """
+    failures = []
+    m = boot(text="")                       # nothing typed, so no question
+    print("closing the last window:")
+    after = m.sym("WndCount")
+    keep = [m.peek(after + i) for i in range(1, 8)]   # WndCur onwards
+    m.call("WndClose")
+    if m.peek(m.sym("WndCount")) != 0:
+        failures.append("the last window does not close")
+        print(f"  WndCount is {m.peek(m.sym('WndCount'))}")
+        return failures
+    if m.peek16(m.sym("WinApp")) or m.peek16(m.sym("WinStateP")):
+        failures.append("the closed window still owns the live record")
+    shot = bytes(m.peek(m.scr_addr(c, r)) for r in range(9, 183) for c in range(32))
+    m.call("DrawDesktop")
+    bare = bytes(m.peek(m.scr_addr(c, r)) for r in range(9, 183) for c in range(32))
+    if shot != bare:
+        failures.append("closing the last window leaves something behind")
+    else:
+        print("  it closes, the live record has no owner, and the desktop is bare")
+    m.call("WndClose")
+    m.m.b = ord("A")
+    m.call("HdlKey")
+    m.m.b, m.m.c = 12, 60
+    m.call("WndHitTest")
+    hit = m.m.a
+    m.call("WndCascade")
+    m.call("WndTile")
+    now = [m.peek(after + i) for i in range(1, 8)]
+    if (m.peek(m.sym("WndCount")) != 0 or m.peek16(m.sym("WinApp"))
+            or hit != m.sym("CTL_NONE") or now[1:] != keep[1:]):
+        failures.append("an empty desktop does not hold")
+        print(f"  count {m.peek(m.sym('WndCount'))}, hit {hit}, "
+              f"after WndCount {now} was {keep}")
+    else:
+        print("  a second close, a key, a press, cascade and tile all do "
+              "nothing, and nothing past WndCount moved")
+    m.m.a = m.sym("APP_NOTE")
+    m.call("WndOpen")
+    if (m.peek(m.sym("WndCount")) != 1
+            or m.peek16(m.sym("WinApp")) != m.sym("AppNote")
+            or m.peek(m.sym("WndZ")) != m.peek(m.sym("WndCur"))):
+        failures.append("a notepad does not open on an empty desktop")
+    else:
+        print("  and a notepad opens on it as the one live window")
     return failures
 
 

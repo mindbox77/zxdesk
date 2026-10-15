@@ -65,8 +65,7 @@ DskSetAfter:
                 ; surface taken again before the panel goes back over it.
                 call    RestoreUnder
                 call    DrawDesktop
-                call    WinDraw
-                call    NoteSync
+                call    WinDrawLive             ; dlgset.inc
                 call    SaveUnder
                 jp      PnlPaint
 

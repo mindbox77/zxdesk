@@ -2491,15 +2491,6 @@ ENDIF
                 ; vacates a strip that the icon was showing through.
                 include "desktop.inc"
 
-; The editor subject is TEST only. The Fuse report showed NOTE 17 of
-; 17 and the headless harness checks the same seventeen things and
-; then reads every glyph back off the screen, so the Fuse copy was
-; the weaker of two and it was the one costing bytes in the build
-; with 774 of them left.
-IFDEF TEST
-                include "notetest.inc"
-ENDIF
-
 
 ; ------------------------------------------------------------
 ;  Window drag, as event handlers
@@ -2849,6 +2840,8 @@ WndRepaintAll:
                 call    WndFlush
                 call    DrawDesktop
                 ld      a,(WndCount)
+                or      a
+                ret     z                       ; an empty desktop is just that
                 ld      b,a
 WraPaint:
                 push    bc
@@ -3033,17 +3026,20 @@ WoNoBuf:
                 scf
                 ret
 
-; Closes the front window. The last one does not close, because
-; nothing here can open the notepad again and a desktop with no
-; windows and no way back is worse than a close box that does
-; nothing.
+; Closes the front window, the last one included. It used to refuse
+; the last, because nothing could open the notepad again and a desktop
+; with no windows and no way back was worse than a close box that did
+; nothing. The desktop shortcuts, FILE NEW and the shortcut keys are
+; that way back now, so an empty desktop is a state the system has
+; and everything that walks the z order has been taught it: the
+; repaint, the hit test, cascade, tile and the key handler all check
+; for a count of nought before they look at a window.
 WndClose:
                 ld      a,(WndCount)
-                cp      2
-                jr      nc,WcMayClose
-                xor     a                       ; the last window does not
-                ld      (WndForce),a            ; close, so a force that got
-                ret                             ; this far is spent
+                or      a
+                jr      nz,WcMayClose
+                ld      (WndForce),a            ; nothing to close, so a
+                ret                             ; force that got here is spent
 WcMayClose:
                 ; F2 shipped without a teardown vector and said so in
                 ; writing: everything an application takes comes back
@@ -3068,13 +3064,17 @@ WcGo:
                 ld      de,WndZ+1
                 ld      a,(WndCount)
                 dec     a
-                ld      b,a
+                jr      z,WcShifted             ; the last one: nothing behind
+                ld      b,a                     ; it to slide forward, and a
+                                                ; DJNZ from nought would move
+                                                ; 256 bytes, WndCount among them
 WcShift:
                 ld      a,(de)
                 ld      (hl),a
                 inc     hl
                 inc     de
                 djnz    WcShift
+WcShifted:
                 ; whatever that window took from the heap goes back, and
                 ; the window code does not have to remember what it was
                 ld      a,(WndCur)
@@ -3082,6 +3082,19 @@ WcShift:
                 call    HeapFreeOwner
                 ld      hl,WndCount
                 dec     (hl)
+                jr      nz,WcBehind
+                ; No window now. The live record still names the one that
+                ; closed, and its state and buffer blocks have just been
+                ; freed, so it is told it has no owner and no blocks: AppSave
+                ; then writes nothing and AppCall calls nothing, which is what
+                ; every path that reaches the live window with none open
+                ; relies on.
+                ld      hl,0
+                ld      (WinApp),hl
+                ld      (WinStateP),hl
+                ld      (WinBufP),hl
+                jp      WndRepaintAll
+WcBehind:
                 ld      a,(WndZ)
                 ld      (WndCur),a              ; its record is stale but the
                 call    WndRecAt                ; table's copy is not
@@ -3118,6 +3131,8 @@ WndHitTest:
                 ld      (WhtRow),a
                 call    WndFlush
                 ld      a,(WndCount)
+                or      a
+                jr      z,WhtNone               ; no windows, so nothing is hit
                 ld      b,a
                 ld      c,0
 WhtLoop:
@@ -3208,6 +3223,7 @@ WhtNext:
                 pop     bc
                 inc     c
                 djnz    WhtLoop
+WhtNone:
                 ld      a,CTL_NONE
                 ret
 
@@ -4067,6 +4083,17 @@ ENDIF
                 include "shortcut.inc"
 
                 include "scroll.inc"
+
+; The editor subject is TEST only. The Fuse report showed NOTE 17 of
+; 17 and the headless harness checks the same seventeen things and
+; then reads every glyph back off the screen, so the Fuse copy was
+; the weaker of two and it was the one costing bytes in the build
+; with 774 of them left. It is in the slow region since 15 October:
+; a correctness subject never runs inside a frame, and the fast region
+; of the TEST build had run out.
+IFDEF TEST
+                include "notetest.inc"
+ENDIF
 
                 ; F3's staging area. It used to be the printer buffer at
                 ; $5B00 and the printer wants that back.

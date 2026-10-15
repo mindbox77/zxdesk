@@ -122,10 +122,20 @@ DlgaLattice:
                 ; taken again before the panel goes back on top of it.
                 call    RestoreUnder            ; the buffer is now stale
                 call    DrawDesktop
-                call    WinDraw                 ; the window is on top of it
-                call    NoteSync                ; regrab only if text is pending
+                call    WinDrawLive             ; the window is on top of it
                 call    SaveUnder               ; take the surface again
                 jp      PnlPaint
+
+; The live window over a desktop that has just been repainted, for the
+; two panels whose settings change what is underneath them. With no
+; window open there is nothing to put back, and the live record names
+; a window that has gone.
+WinDrawLive:
+                ld      a,(WndCount)
+                or      a
+                ret     z
+                call    WinDraw
+                jp      NoteSync                ; regrab only if text is pending
 
 ; ------------------------------------------------------------
 ;  The one settings action that is not the panel's own. SAVE

@@ -36,6 +36,10 @@ ARRHALFH        equ     ARRDESKH/2
 ;  title bar behind it is showing.
 ; ------------------------------------------------------------
 WndCascade:
+                ld      a,(WndCount)
+                or      a
+                ret     z                       ; ArrDone would load a closed
+                                                ; window's record into the live one
                 call    WndFlush
                 ld      a,(WndCount)
                 ld      (ArrN),a
@@ -139,6 +143,9 @@ ArrDone:
 ;  what keeps a notepad's document with its own window.
 ; ------------------------------------------------------------
 WndTile:
+                ld      a,(WndCount)
+                or      a
+                ret     z                       ; ArrTileAt has no row for nought
                 call    WndFlush
                 ld      a,(WndCount)
                 dec     a
