@@ -144,8 +144,8 @@ WeEven:
 ;  move; anything wider still belongs in the push chain.
 ; ------------------------------------------------------------
 DeskFillCol:
-                ld      a,(FrH)
-                or      a
+DeskHook2:      ld      a,(FrH)         ; SetApply makes this JP WallFill
+                or      a               ; while the desktop is a picture
                 ret     z
                 ld      a,(FrX)
                 ld      c,a

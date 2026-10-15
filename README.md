@@ -54,6 +54,7 @@ a lot of evenings. They're yours.
 | **Application interface** | A jump table at `$8000`, 45 slots, with slot n at `$8000 + 3n`. The clock, the calendar, the notepad and the commander all work through it and name no desktop global. |
 | **Loadable apps** | An app is a file: a header, an image assembled at origin nought, and a relocation table. The desktop loads it into the heap from RAM, a 128K bank or tape and runs it in a window, three at a time, with a tick for apps that keep time. See [Writing an app](#writing-an-app). |
 | **Persistence** | Settings written to storage with a magic byte and a version, and read back at boot. |
+| **Wallpaper** | On a 128K the desktop can be a picture: a band of sixteen character rows kept in a spare bank and copied back behind every window move. DESKTOP in the settings panel cycles PLAIN, DOTS, IMAGE. `mkwall.py` turns any picture into the band. |
 
 Screenshots:
 
@@ -856,6 +857,7 @@ build it blind on an emulator, so it waits until one arrives.
     build.sh, run.sh            assemble, and load onto the machine
     tstates.py, taplant.py      timing arithmetic, and tape block planting
     mkapi.py, mkapp.py          write the app include, and assemble an app
+    mkwall.py, taploader.py     picture to wallpaper band, and the two block loader
     api/zxdesk.inc              what an app is assembled against
     examples/                   three worked apps, built outside the desktop
 
@@ -883,6 +885,7 @@ build it blind on an emulator, so it waits until one arrives.
     src/filemgr.inc             the file panels
     src/loader.inc              loads an app file into the heap and runs it
     src/settings.inc            the settings record
+    src/wall.inc                the wallpaper fill, from bank 1
     src/setdata.inc             the part of it the frame reads
     src/script.inc              scripted input, for end to end verification
     images/                     the screenshots above

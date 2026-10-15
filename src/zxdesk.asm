@@ -39,6 +39,13 @@ STATROW         equ     23              ; char row for the status line
 ; All three live in the fixed $8000..$BFFF region so that paging the
 ; $C000 bank during machine detection cannot pull them away.
 STACKTOP        equ     $BD00
+; The wallpaper band. On a 128K it lives in bank 1 above the RAM disk
+; directory; the loader puts it in the screen and BankWallBoot moves
+; it. A 48K has nowhere to keep 4,096 bytes and shows the lattice.
+WALLBANK        equ     1
+WALLADDR        equ     $F000           ; in bank 1, 4,096 bytes to $FFFF
+WALLLOAD        equ     $4000           ; where the tape's second block lands
+WALLSIZE        equ     4096
 IRQHANDLER      equ     $BDBD
 IRQTABLE        equ     $BE00
 
@@ -109,7 +116,8 @@ ENDIF
                 di
                 ld      sp,STACKTOP
                 call    DetectMachine
-                call    SetupIM2
+                call    BankWallBoot    ; the band out of the screen before
+                call    SetupIM2        ; anything paints over it
                 call    BuildScrTab
                 call    MouseInit
                 call    JoyInit
@@ -460,36 +468,21 @@ InitScreen:
                 call    PrintStr
                 ret
 
-; sparse dot lattice, four pixels apart, offset on alternate rows
+; The desktop between the menu rule and the status rule, lattice or
+; picture, through the same fill the erase path uses: DevFillDesk is
+; where SetApply points the choice, so this paints whatever a drag
+; would put back, and nothing here has to know which it is. It used
+; to be a loop of its own with a third copy of the lattice bytes.
 DrawDesktop:
+                xor     a
+                ld      (FrX),a
                 ld      a,DESKTOP_TOP
-DdLoop:
-                ld      (TmpY),a
-                and     3
-                jr      z,DdPat0
-                cp      2
-                jr      z,DdPat2
-                ld      c,0
-                jr      DdFill
-DdPat0:
-                ld      c,$88
-LatA3           equ     $-1             ; SetApply patches the operand
-                jr      DdFill
-DdPat2:
-                ld      c,$22
-LatB3           equ     $-1
-DdFill:
-                ld      a,(TmpY)
-                call    RowAddr
-                ld      b,SCRCOLS
-DdRow:
-                ld      (hl),c
-                inc     l
-                djnz    DdRow
-                ld      a,(TmpY)
-                inc     a
-                cp      DESKTOP_BOT+1
-                jr      nz,DdLoop
+                ld      (FrY),a
+                ld      a,SCRCOLS
+                ld      (FrW),a
+                ld      a,DESKTOP_BOT-DESKTOP_TOP+1
+                ld      (FrH),a
+                call    DevFillDesk
                 jp      DskPaintAll             ; the shortcuts are part of
                                                 ; what a repaint puts back,
                                                 ; not something painted over
@@ -1389,8 +1382,8 @@ FdOddDone:
                 ret
 
 DevFillDesk:
-                ld      a,(FrH)
-                or      a
+DeskHook1:      ld      a,(FrH)         ; SetApply makes this JP WallFill
+                or      a               ; while the desktop is a picture
                 ret     z
                 ld      a,(FrW)
                 srl     a
@@ -1882,6 +1875,12 @@ TxtAb4:         defb    "PIXEL EXACT",0
                 include "script.inc"
 
                 include "damage.inc"
+
+; The bench build has 37 bytes to spare and no room for the picture,
+; so it keeps the lattice only and the hooks stay put.
+IFNDEF BENCH
+                include "wall.inc"
+ENDIF
 
 WinErase:
                 ld      a,(WinOldX)
@@ -2500,6 +2499,7 @@ ENDIF
 IFDEF TEST
                 include "notetest.inc"
 ENDIF
+
 
 ; ------------------------------------------------------------
 ;  Window drag, as event handlers

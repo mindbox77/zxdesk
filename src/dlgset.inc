@@ -25,7 +25,7 @@ DLGW            equ     16              ; SUMAXW, and B3 widened that from 12
 DLGH            equ     68             ; a row taller, for the sound line
 DLGROW0         equ     DLGY+10         ; first line of content
 DLGLINES        equ     7
-DLGLATTICE      equ     2               ; the row whose effect is behind the panel
+DLGLATTICE      equ     2               ; DESKTOP, the row whose effect is behind the panel
 
 DlgOpen:
                 call    PnlUpInc
@@ -159,8 +159,8 @@ DlgRows:
 
                 defb    PT_CYCLE
                 defw    TxtDlgLat, SetLattice
-                defb    2
-                defw    NmOffOn
+                defb    3
+                defw    NmDesk
 
                 defb    PT_CYCLE
                 defw    TxtDlgKeys, SetKeyPtr
@@ -188,7 +188,7 @@ DlgRows:
 TxtDlgTitle:    defb    "SETTINGS",0
 TxtDlgSpeed:    defb    "SPEED",0
 TxtDlgInv:      defb    "INVERT Y",0
-TxtDlgLat:      defb    "LATTICE",0
+TxtDlgLat:      defb    "DESKTOP",0
 TxtDlgSnd:      defb    "SOUND",0
 TxtDlgKeys:     defb    "KEY PTR",0
 TxtDlgSave:     defb    "SAVE",0
@@ -201,10 +201,14 @@ TxtMed:         defb    "MED",0
 TxtFast:        defb    "FAST",0
 TxtExt:         defb    "EXT",0
 TxtAll:         defb    "ALL",0
+TxtPlain:       defb    "PLAIN",0
+TxtDots:        defb    "DOTS",0
+TxtImage:       defb    "IMAGE",0
 
 NmOffOn:        defw    TxtOff, TxtOn
 NmSpeed:        defw    TxtSlow, TxtMed, TxtFast
 NmKeys:         defw    TxtOff, TxtExt, TxtAll
+NmDesk:         defw    TxtPlain, TxtDots, TxtImage
 
 DlgUp:          defb    0               ; panels up, not a flag
 

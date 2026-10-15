@@ -1315,23 +1315,19 @@ BstNoOld:
                 or      l
                 call    z,BSetOk                        ; 9 corrupt speed clamped
 BstNoClamp:
-                ; LATTICE must reach all six operands, in all three
-                ; routines that paint the desktop. Two of the three are
-                ; easy to forget, because the narrow column fill and the
-                ; initial paint are not the one you are looking at.
+                ; DESKTOP must reach all four operands, in both routines
+                ; that paint the lattice. The narrow column fill is the
+                ; one that is easy to forget. The initial paint used to be
+                ; a third copy; it goes through DevFillDesk now.
                 xor     a
                 ld      (SetLattice),a
                 call    SetApply
                 ld      a,(LatA1)
                 ld      hl,LatA2
                 or      (hl)
-                ld      hl,LatA3
-                or      (hl)
                 ld      hl,LatB1
                 or      (hl)
                 ld      hl,LatB2
-                or      (hl)
-                ld      hl,LatB3
                 or      (hl)
                 call    z,BSetOk                        ; 10 plain desktop
 
@@ -1344,16 +1340,10 @@ BstNoClamp:
                 ld      a,(LatA2)
                 cp      $88
                 jr      nz,BstNoLat
-                ld      a,(LatA3)
-                cp      $88
-                jr      nz,BstNoLat
                 ld      a,(LatB1)
                 cp      $22
                 jr      nz,BstNoLat
                 ld      a,(LatB2)
-                cp      $22
-                jr      nz,BstNoLat
-                ld      a,(LatB3)
                 cp      $22
                 call    z,BSetOk                        ; 11 dot lattice back
 BstNoLat:

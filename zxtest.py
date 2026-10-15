@@ -37,7 +37,13 @@ SENTINEL = 0x0100          # nothing is mapped here; a HALT is planted to land o
 # started at address zero silently returns CPU registers as if they
 # were program bytes, which looks exactly like a miscompiled build.
 MEMOFF = 40
-STACK = 0xBD00
+# The machine's stack starts at STACKTOP, $BD00, and nothing lives
+# between there and the interrupt handler at $BDBD. This harness has
+# no interrupts, so its stack starts at the top of that gap: the TEST
+# image reaches $BCF5 since the wallpaper fill joined it, and a stack
+# from $BD00 was writing over the keyboard subject. "Free before the
+# stack" in build.sh is the stack's room, and here it is 188 more.
+STACK = 0xBDBC
 
 
 def load_symbols(path):
@@ -178,12 +184,24 @@ def write_png(path, pixels, w, h):
         + chunk(b"IEND", b""))
 
 
-def boot(text="ZX DESK NOTES"):
+def load_band(m):
+    """The wallpaper band into bank 1, as BankWallBoot leaves it."""
+    band = open("src/wallpaper.bin", "rb").read()
+    off = m.sym("WALLADDR") - 0xC000
+    if m.cur_bank == m.sym("WALLBANK"):
+        for i, b in enumerate(band):
+            m.poke(0xC000 + off + i, b)
+    else:
+        m.banks[m.sym("WALLBANK")][off:off + len(band)] = band
+    return band
+
+
+def boot(text="ZX DESK NOTES", banked=False):
     """Boot the desktop headlessly, exactly in the order Main does."""
-    m = Machine("build/zxdesk.bin", "build/zxdesk.sym")
-    for r in ("DetectMachine", "SetupIM2", "BuildScrTab", "MouseInit",
-              "JoyInit", "StInit", "SetLoad", "SetApply", "DskInit",
-              "InitScreen", "WndInit"):
+    m = Machine("build/zxdesk.bin", "build/zxdesk.sym", banked=banked)
+    for r in ("DetectMachine", "BankWallBoot", "SetupIM2", "BuildScrTab",
+              "MouseInit", "JoyInit", "StInit", "SetLoad", "SetApply",
+              "DskInit", "InitScreen", "WndInit"):
         m.call(r)
     for ch in text:
         m.call_with_a("NoteKey", ord(ch))
@@ -227,16 +245,17 @@ def shots():
     m.call("DlgOpen")
     render(m, "shots/headless-settings.png")
 
-    # click LATTICE, which is line two, so pixel row DLGROW0 + 16
-    m.m.c = m.sym("DLGROW0") + 16
-    m.call("DlgClick")
-    render(m, "shots/headless-lattice-off.png")
-    print(f"  SetLattice is now {m.peek(m.sym('SetLattice'))}")
-
-    m.m.c = m.sym("DLGROW0") + 16
-    m.call("DlgClick")
-    render(m, "shots/headless-lattice-on.png")
-    print(f"  SetLattice is now {m.peek(m.sym('SetLattice'))}")
+    # click DESKTOP, which is line two, so pixel row DLGROW0 + 16:
+    # DOTS to IMAGE, to PLAIN, and back to DOTS, on a 128K with the
+    # band where BankWallBoot would have put it
+    m = boot(banked=True)
+    m.call("DlgOpen")
+    load_band(m)
+    for shot in ("image", "plain", "dots"):
+        m.m.c = m.sym("DLGROW0") + 16
+        m.call("DlgClick")
+        render(m, f"shots/headless-desktop-{shot}.png")
+        print(f"  SetLattice is now {m.peek(m.sym('SetLattice'))}")
 
     # G3's two panels, with something in the directory to list
     m = boot()
@@ -3850,7 +3869,7 @@ def settings_checks():
         return out
 
     print("settings panel, read back off the screen:")
-    want = ["SPEED      MED", "INVERT Y    ON", "LATTICE     ON",
+    want = ["SPEED      MED", "INVERT Y    ON", "DESKTOP   DOTS",
             "KEY PTR    EXT", "SOUND       ON", "SAVE", "DONE"]
     for i, expect in enumerate(want):
         got = read_line(i)
@@ -3918,7 +3937,80 @@ def settings_checks():
         m.call("DlgClick")
 
     dots = desktop_strip()
-    click(2)                                    # LATTICE
+
+    # DESKTOP cycles DOTS, IMAGE, PLAIN on a 128K. The image is the
+    # wallpaper band in bank 1, which BankWallBoot would have copied
+    # from the screen and this harness puts there directly. This boot
+    # is a 48K, so the image half runs on a second, banked, boot.
+    mk = boot(banked=True)
+    if not mk.peek(mk.sym("Is128")):
+        failures.append("the banked boot did not detect a 128K")
+    mk.poke(mk.sym("PtrX"), 230)
+    mk.poke(mk.sym("PtrY"), 150)
+    mk.call("PtrSaveBg")
+    mk.call("PtrDraw")
+    mk.call("DlgOpen")
+    band = load_band(mk)
+    WALLTOP, WALLBOT = mk.sym("WALLTOP"), mk.sym("WALLBOT")
+
+    def band_at(c, r):
+        return band[(r - WALLTOP) * 32 + c] if WALLTOP <= r < WALLBOT else 0
+
+    # the right hand edge, clear of the window, the panel, the icons
+    # and the parked pointer, so what is there is the desktop alone
+    def image_strip():
+        return bytes(mk.peek(mk.scr_addr(c, r))
+                     for r in range(120, 140) for c in range(26, 32))
+
+    def band_strip():
+        return bytes(band_at(c, r) for r in range(120, 140) for c in range(26, 32))
+
+    mk.m.c = R0 + 2 * 8
+    mk.call("DlgClick")                         # DESKTOP -> IMAGE
+    if mk.peek(mk.sym("SetLattice")) != 2:
+        failures.append("desktop cycle did not reach the image")
+    image = image_strip()
+    if image != band_strip():
+        failures.append("image desktop is not the band")
+        print(f"  the image desktop reads {image[:8].hex()}, "
+              f"the band says {band_strip()[:8].hex()}")
+    else:
+        print("  the image desktop is the band, byte for byte")
+    above = bytes(mk.peek(mk.scr_addr(c, 20)) for c in range(26, 32))
+    if any(above):
+        failures.append("image desktop is not plain above the band")
+    else:
+        print("  above the band the image desktop is plain")
+
+    # the erase path takes the same hook: a strip two wide through
+    # DeskFillCol and a wider one through DevFillDesk, both across the
+    # top edge of the band, must put back the band and plain above it.
+    # Column 12 is where the picture reaches its top row, so a fill
+    # that reads the wrong band row cannot pass on blank bytes.
+    for name, x, w in (("DeskFillCol", 12, 2), ("DevFillDesk", 10, 6)):
+        mk.poke(mk.sym("FrX"), x)
+        mk.poke(mk.sym("FrY"), 24)
+        mk.poke(mk.sym("FrW"), w)
+        mk.poke(mk.sym("FrH"), 16)
+        for r in range(24, 40):
+            for c in range(x, x + w):
+                mk.poke(mk.scr_addr(c, r), 0xA5)  # something not the band
+        mk.call(name)
+        want = bytes(band_at(c, r)
+                     for r in range(24, 40) for c in range(x, x + w))
+        got = bytes(mk.peek(mk.scr_addr(c, r))
+                    for r in range(24, 40) for c in range(x, x + w))
+        if got != want:
+            failures.append(f"{name} did not restore the image")
+            print(f"  {name} left {got.hex()} wanting {want.hex()}")
+        elif mk.cur_bank != 0:
+            failures.append(f"{name} left bank {mk.cur_bank} paged in")
+        else:
+            print(f"  {name} restores the image across the band's edge "
+                  f"and pages bank 0 back")
+
+    # a 48K has no bank 1, so for it the cycle goes DOTS, PLAIN, DOTS
+    click(2)                                    # DESKTOP -> PLAIN on a 48K
     plain = desktop_strip()
     if m.peek(m.sym("SetLattice")) != 0:
         failures.append("lattice toggle did not store")
@@ -3938,8 +4030,8 @@ def settings_checks():
     else:
         print("  lattice on restores the dot lattice byte for byte")
 
-    # and the panel is still intact on top of the two repaints
-    if read_line(2) != "LATTICE     ON":
+    # and the panel is still intact on top of the three repaints
+    if read_line(2) != "DESKTOP   DOTS":
         failures.append("panel damaged by the lattice repaint")
         print(f"  the panel now reads |{read_line(2)}|")
     else:

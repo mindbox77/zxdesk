@@ -84,6 +84,28 @@ BankHome:
                 jr      BankPage
 
 ; ------------------------------------------------------------
+;  BankWallBoot
+;  The tape's second block is the wallpaper band, loaded into the
+;  screen because that is the one place 4,096 bytes can land
+;  without being under something. On a 128K it is copied into
+;  bank 1, above the directory, before anything paints; on a 48K
+;  it is left to InitScreen to clear and the picture is not on
+;  offer. Both the source and the destination must be visible at
+;  once, which is why the loader did not put it at $C000.
+; ------------------------------------------------------------
+BankWallBoot:
+                ld      a,(Is128)
+                or      a
+                ret     z
+                ld      a,WALLBANK
+                call    BankPage
+                ld      hl,WALLLOAD
+                ld      de,WALLADDR
+                ld      bc,WALLSIZE
+                ldir
+                jp      BankHome
+
+; ------------------------------------------------------------
 ;  BkEntry
 ;  in:  A = handle 1..BANKFILES
 ;  out: HL = its directory entry, with bank 1 paged in

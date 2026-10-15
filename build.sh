@@ -82,4 +82,13 @@ if (( FAIL )); then
 fi
 printf '%s: slow $6000-$%04X, %d free; fast $8000-$%04X, %d free before the stack\n' \
   "$NAME" "$SLOWEND" "$((SLOWTOP - SLOWEND))" "$END" "$((CODETOP - END))"
+
+# The desktop carries the wallpaper band as a second block, loaded to
+# $EF00 by the BASIC loader before the jump. pasmo's loader reads one
+# block, so taploader.py swaps it for one that reads two and puts the
+# band on the end. The harness builds have no desktop and keep
+# pasmo's loader.
+if [[ -z "${BENCH:-}" && -z "${TEST:-}" ]]; then
+  python3 "$ROOT/taploader.py" "$OUT" "$ROOT/src/wallpaper.bin"
+fi
 echo "$OUT"

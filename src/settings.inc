@@ -146,26 +146,69 @@ SetaSpeedOk:
                 ld      (SetKeyPtr),a
 SetaKeyOk:
 
-                ; LATTICE picks the desktop background. The pattern bytes
-                ; are the immediate operands of the three routines that
-                ; paint it, patched here rather than read from a variable,
-                ; because two of the three are inner loops that write a
-                ; byte every few T states and cannot afford a load.
+                ; DESKTOP picks the background: 0 plain, 1 the lattice, 2
+                ; the picture. The pattern bytes are the immediate operands
+                ; of the two routines that paint the lattice, patched
+                ; here rather than read from a variable, because two of
+                ; the three are inner loops that write a byte every few T
+                ; states and cannot afford a load. The picture cannot be an
+                ; immediate, so for it the first instruction of the two
+                ; fills on the erase path becomes a jump to WallFill, and
+                ; is put back when it is not. The lattice bytes go blank
+                ; at the same time, so anything that still paints by
+                ; pattern paints plain.
                 ld      a,(SetLattice)
+                cp      3
+                jr      c,SetaDeskOk
+                ld      a,1
+                ld      (SetLattice),a
+SetaDeskOk:
+                ; IMAGE needs bank 1, so on a 48K the cycle skips it: 2
+                ; becomes 0 and the panel never shows a picture it has not got.
+                cp      2
+                jr      nz,SetaDeskHave
+                ld      a,(Is128)
                 or      a
+                ld      a,2
+                jr      nz,SetaDeskHave
+                xor     a
+                ld      (SetLattice),a
+SetaDeskHave:
                 ld      hl,0                    ; plain: both rows blank
-                jr      z,SetaLatSet
+                cp      1
+                jr      nz,SetaLatSet
                 ld      hl,(LatDots)            ; L = row 0 byte, H = row 2
 SetaLatSet:
                 ld      a,l
                 ld      (LatA1),a
                 ld      (LatA2),a
-                ld      (LatA3),a
                 ld      a,h
                 ld      (LatB1),a
                 ld      (LatB2),a
-                ld      (LatB3),a
+                ld      hl,HookOff
+                ld      a,(SetLattice)
+                cp      2
+                jr      nz,SetaHook
+                ld      hl,HookOn
+SetaHook:
+                push    hl
+                ld      de,DeskHook1
+                ld      bc,3
+                ldir
+                pop     hl
+                ld      de,DeskHook2
+                ld      bc,3
+                ldir
                 ret
+
+; The two three byte instructions the hooks hold, as data. The bench
+; build carries no WallFill, so there IMAGE paints plain.
+IFNDEF BENCH
+HookOn:         jp      WallFill
+ELSE
+HookOn:         ld      a,(FrH)
+ENDIF
+HookOff:        ld      a,(FrH)
 
 ; The dot lattice as designed: a set pixel every four across on rows
 ; nought and two of every four, offset by two so the dots sit on a
