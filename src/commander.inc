@@ -160,10 +160,11 @@ CmdScrollInfo:
 ; ------------------------------------------------------------
 ;  CmdScrollTo
 ;  in: A = the file to point at
-;  The commander's listing always starts at the first file, so
-;  what its bar tracks is the selection rather than a view
-;  offset. That is what a list box's slider does, and it is
-;  honest: there is no second thing here that could move.
+;  The commander's listing follows its selection, so what its
+;  bar tracks is the selection rather than a view offset. That
+;  is what a list box's slider does, and it is honest: the view
+;  is a function of the selection and the window's height, not
+;  a second thing that could move on its own.
 ; ------------------------------------------------------------
 CmdScrollTo:
                 ld      (CmdWant),a
@@ -239,14 +240,31 @@ CmpLeft:
 CmpNotAct:
                 ld      b,CMDHEADY-WinCapH
                 call    ApiWinPrintIf
-                ; and the files
+                ; and the files. The listing starts at the first one
+                ; until the selection is past the rows there are, and
+                ; then it starts wherever puts the selection on the last
+                ; row: a shrink left the selection below the window,
+                ; still the row the keys would act on.
                 call    CmdRows
                 ld      (CmdN),a
+                ld      b,a
+                call    CmdSelAt
+                ld      a,(hl)
+                sub     b
+                jr      c,CmpTop0
+                inc     a                       ; selection - rows + 1
+                jr      CmpTopSet
+CmpTop0:
+                xor     a
+CmpTopSet:
+                ld      (CmdTop),a
                 xor     a
                 ld      (CmdRow),a
 CmpRow:
                 ld      a,(CmdRow)
                 push    af
+                ld      hl,CmdTop
+                add     a,(hl)                  ; the file this row shows
                 call    ApiStDir
                 jr      nc,CmpPaint             ; HL is the name
                 ; Nothing there. The first row of a device that cannot
@@ -272,9 +290,12 @@ CmpPaint:
                 add     a,CMDLISTY-WinCapH
                 ld      (CmdPx),a
                 ; the row the keys are on, in the pane the keys are in
+                ld      a,(CmdTop)
+                add     a,b
+                ld      e,a                     ; the file on this row
                 call    CmdSelAt
                 ld      a,(hl)
-                cp      b
+                cp      e
                 jr      nz,CmpPlain
                 ld      a,(CmdPane)
                 ld      c,a
@@ -390,7 +411,9 @@ ENDIF
                 cp      'C'
                 jr      nz,CmkNotC
                 call    CmdCopy
-                jr      CmdRepaint
+                jr      nc,CmdRepaint
+                ld      a,(CmdWasK)             ; an alert is up: leave it
+                jp      ApiStSelect
 CmkNotC:
                 cp      'D'
                 ret     nz
@@ -465,8 +488,13 @@ CmdOpen:
 ; ------------------------------------------------------------
 ;  CmdCopy
 ;  From the live pane to the other one, which is the operation
-;  the whole shape exists for. One chunk, because a file here is
-;  one chunk: RAMCHUNK is 256 and so is a document.
+;  the whole shape exists for. In chunks, the way the import
+;  goes, because a bank file can be 8K and the buffer is 256
+;  bytes: one chunk left a 256 byte stump on the far side with
+;  the right name and no word that it was short.
+;  out: carry if an alert is up. The file did not fit the far
+;       side, or the far side could not close it, and in either
+;       case nothing is left there to be mistaken for the whole.
 ; ------------------------------------------------------------
 CmdCopy:
                 call    CmdPicked
@@ -478,12 +506,6 @@ CmdCopy:
                 call    ApiStOpen
                 ret     c
                 ld      (CmdHandle),a
-                ld      hl,CmdBuf
-                ld      bc,CMDBUFSZ
-                call    ApiStRead
-                ld      (CmdGot),bc
-                ld      a,(CmdHandle)
-                call    ApiStClose
                 ; the other pane
                 ld      a,(CmdActive)
                 xor     1
@@ -491,13 +513,60 @@ CmdCopy:
                 ld      hl,CmdWork
                 ld      b,FA_OVERWRITE
                 call    ApiStOpen
-                ret     c
-                ld      (CmdHandle),a
-                ld      hl,CmdBuf
-                ld      bc,(CmdGot)
-                call    ApiStWrite
+                jr      c,CmcNoRoom
+                ld      (CmdOut),a
+CmcChunk:
+                ld      a,(CmdActive)
+                call    CmdUse
                 ld      a,(CmdHandle)
-                jp      ApiStClose
+                ld      hl,CmdBuf
+                ld      bc,CMDBUFSZ
+                call    ApiStRead
+                ld      (CmdGot),bc
+                ld      a,(CmdActive)
+                xor     1
+                call    CmdUse
+                ld      bc,(CmdGot)
+                ld      a,b
+                or      c
+                jr      z,CmcCopied
+                ld      a,(CmdOut)
+                ld      hl,CmdBuf
+                call    ApiStWrite
+                ld      hl,(CmdGot)
+                or      a
+                sbc     hl,bc
+                jr      z,CmcChunk
+                ; it did not all fit, and part of a file is worse than none
+                ld      a,(CmdOut)
+                call    ApiStClose
+CmcNoRoom:
+                ld      hl,TxtCmdBig
+                jr      CmcScrap
+CmcCopied:
+                ld      a,(CmdOut)
+                call    ApiStClose
+                jr      nc,CmcSrcClose
+                ; the close is the save on tape, and SPACE stopped it
+                ld      hl,TxtCmdLost
+CmcScrap:
+                push    hl
+                ld      hl,CmdWork
+                call    ApiStDelete
+                call    CmcSrcClose
+                pop     hl
+                ld      de,CmdWork
+                call    ApiDlgAlert
+                scf
+                ret
+; the source handle, released on its own backend; carry clear
+CmcSrcClose:
+                ld      a,(CmdActive)
+                call    CmdUse
+                ld      a,(CmdHandle)
+                call    ApiStClose
+                or      a
+                ret
 
 CmdDelete:
                 call    CmdPicked
@@ -634,12 +703,14 @@ CmiDone:
                 jp      nz,CmiNext
                 ret
 
-TxtCmdBig:      defb    "DOES NOT FIT",0
 CmdAll:         defb    0
 CmdDest:        defb    0
-CmdOut:         defb    0
 CmdFirst:       defs    13
 ENDIF
+
+TxtCmdBig:      defb    "DOES NOT FIT",0
+TxtCmdLost:     defb    "NOT SAVED",0
+CmdOut:         defb    0
 
 CMDBUFSZ        equ     256
 
@@ -654,6 +725,7 @@ CmdCol:         defb    0
 CmdPx:          defb    0
 CmdRow:         defb    0
 CmdN:           defb    0
+CmdTop:         defb    0               ; the file on the first row
 CmdName:        defw    0
 CmdWasD:        defb    0
 CmdWasK:        defb    0

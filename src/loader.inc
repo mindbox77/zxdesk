@@ -122,8 +122,17 @@ LdrFind:
                 ld      hl,TxtLdrBusy
                 jp      LdrFail
 LdrFresh:
-                ld      hl,(LdrHdr+4)
+                ; A version 3 image carries a 22 byte descriptor and gets
+                ; its tick vector zeroed below. Version 4 carries the tick,
+                ; so it needs all 24: accept 22 and the two bytes LdrDone
+                ; copies into APP_TICK are the first relocation offset.
                 ld      de,APPSIZE-2
+                ld      a,(LdrHdr+3)
+                cp      4
+                jr      c,LdrFreshV3
+                ld      de,APPSIZE
+LdrFreshV3:
+                ld      hl,(LdrHdr+4)
                 or      a
                 sbc     hl,de
                 jp      c,LdrBad                ; no room for a descriptor

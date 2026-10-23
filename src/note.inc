@@ -892,6 +892,9 @@ NoteSaveAs:
                 ld      (NoteGot),bc
                 ld      a,(NoteHandle)
                 call    ApiStClose
+                ret     c                       ; on tape the close is the
+                                                ; save, and SPACE can stop it:
+                                                ; the note stays modified
                 ld      hl,(NoteGot)
                 ld      de,NOTESIZE
                 or      a

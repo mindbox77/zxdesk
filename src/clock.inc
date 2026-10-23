@@ -93,19 +93,18 @@ ClkInitFrac:
 ;  happened since the last look, which is normally one.
 ; ------------------------------------------------------------
 ClkTick:
-                ld      hl,(IrqCnt)
-                ld      de,(ClkLast)
+                ld      hl,(IrqCnt)             ; read once. A second read for
+                ld      de,(ClkLast)            ; ClkLast let an interrupt
+                push    hl                      ; between the two lose a tick
                 or      a
                 sbc     hl,de
+                pop     de                      ; DE = the one reading
                 ret     z                       ; the common case on a machine
                                                 ; whose loop is keeping up is
                                                 ; that this is one, not nought,
                                                 ; but nought happens the first
                                                 ; time round
-                ld      (ClkDelta),hl
-                ld      hl,(IrqCnt)
-                ld      (ClkLast),hl
-                ld      hl,(ClkDelta)
+                ld      (ClkLast),de
 ClkAccum:
                 ld      a,(ClkFrames)
                 inc     a
@@ -187,6 +186,17 @@ ClkBump:
 ; ------------------------------------------------------------
 ClkService:
                 call    ClkTick
+                ; Held back, dirty flag and all, while anything is drawn
+                ; over the window: the same four as AppTick, because a
+                ; repaint under a menu or a dialog paints the face over it.
+                ld      a,(Dragging)
+                ld      hl,Resizing
+                or      (hl)
+                ld      hl,DlgUp
+                or      (hl)
+                ld      hl,MenuOpen
+                or      (hl)
+                ret     nz
                 ld      a,(ClkDirty)
                 or      a
                 ret     z
@@ -359,4 +369,3 @@ ClkDirty:       defb    0
 ClkVal:         defb    0
 ClkCol:         defb    0
 ClkLast:        defw    0
-ClkDelta:       defw    0

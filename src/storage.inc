@@ -49,6 +49,7 @@ STERR_NAME      equ     7
 STERR_FULL      equ     8
 STERR_HANDLE    equ     9
 STERR_NOSUP     equ     10              ; the backend does not do that
+STERR_STOPPED   equ     11              ; the user stopped the save
 
 StOpen:         defb    $C3             ; JP nn
 StVecOpen:      defw    RamOpen

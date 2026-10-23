@@ -88,6 +88,7 @@ STERR_HANDLE    equ     9
 STERR_NAME      equ     7
 STERR_NOSUP     equ     10
 STERR_NOTFOUND  equ     5
+STERR_STOPPED   equ     11
 ST_BANK         equ     4
 ST_ESXDOS       equ     3
 ST_PRINT        equ     8

@@ -296,12 +296,17 @@ TapcUse:
                 ret
 
 ; Closing a file opened for writing is what actually saves it.
+; Carry out if SPACE stopped the save: the buffer still holds the
+; file, but the tape does not, and a caller that took a clear carry
+; for a save would clear its modified flag over work that is only
+; in RAM.
 TapeClose:
                 ld      a,(TapeDirty)
                 or      a
                 ret     z
                 xor     a
                 ld      (TapeDirty),a
+                ld      (TapeBrk),a
                 ld      a,3                     ; header type 3, CODE
                 ld      (TapeHdr),a
                 ld      hl,(TapeLen)
@@ -317,13 +322,23 @@ TapeClose:
                 xor     a                       ; header block
                 ld      hl,SA_BYTES
                 call    TapeRom
+                ld      a,(TapeBrk)
+                or      a
+                jr      nz,TapcStopped          ; no data after a broken header
                 ld      ix,TAPEBUF
                 ld      de,(TapeLen)
                 ld      a,$FF                   ; data block
                 ld      hl,SA_BYTES
                 call    TapeRom
-                ei
+                ld      a,(TapeBrk)
                 or      a
+                jr      nz,TapcStopped
+                ei
+                ret                             ; carry clear from the OR
+TapcStopped:
+                ei
+                ld      a,STERR_STOPPED
+                scf
                 ret
 
 ; ------------------------------------------------------------

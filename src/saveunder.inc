@@ -32,7 +32,11 @@
 SUMAXW          equ     16              ; byte columns, was 12
 SUMAXH          equ     96              ; pixel rows
 SUDEPTH         equ     4               ; menu, panel, confirm, and one spare
-SUARENA         equ     SUDEPTH*SUMAXW*SUMAXH   ; 6144 bytes, the worst case
+SUHDR           equ     4               ; x, y, w, h ahead of each surface
+; Four full surfaces and their four headers. The headers were not
+; counted once, and the fourth full push put its last sixteen bytes
+; over the start of the heap.
+SUARENA         equ     SUDEPTH*(SUHDR+SUMAXW*SUMAXH)   ; 6160 bytes
 
 ; The arena follows the notepad's buffer, at the top of the chain
 ; that starts at BUFBASE. Sizing it for four full sized surfaces is

@@ -98,6 +98,8 @@ SetSave:
                 ld      (SetGot),bc
                 ld      a,(SetHandle)
                 call    StClose
+                ret     c                       ; the save that the close is
+                                                ; was stopped: say so
                 ld      hl,(SetGot)
                 ld      a,h
                 or      a
