@@ -13,6 +13,7 @@ storage layer and the keyboard decode are pure RAM and can be driven
 here in a fraction of a second with a real assertion at the end.
 
     TEST=1 ./build.sh           assemble what this drives
+    pip install -r requirements.txt   the z80 package, pinned
     ./zxtest.py                 run every headless subject and assert
     ./zxtest.py --shot          boot the desktop and render a PNG
     ./zxtest.py --shots         render the panels and the two windows
@@ -36,7 +37,11 @@ SENTINEL = 0x0100          # nothing is mapped here; a HALT is planted to land o
 # forty bytes of CPU state and then the 64K image. Reading it as if it
 # started at address zero silently returns CPU registers as if they
 # were program bytes, which looks exactly like a miscompiled build.
-MEMOFF = 40
+# The number is taken from the emulator rather than written down, so
+# a z80 release that grows its state block moves the offset with it
+# instead of silently shifting every peek. requirements.txt pins the
+# release this was last run against.
+MEMOFF = len(z80.Z80Machine().get_state_view()) - 0x10000
 # The machine's stack starts at STACKTOP, $BD00, and nothing lives
 # between there and the interrupt handler at $BDBD. This harness has
 # no interrupts, so its stack starts at the top of that gap: the TEST
@@ -64,6 +69,18 @@ class Machine:
         self.m = z80.Z80Machine()
         self.syms = load_symbols(sympath)
         self.mem = self.m.get_state_view()
+        # Prove the offset before anything is read through it: write a
+        # pattern into scratch RAM by the emulator's own call and read it
+        # back through the view. A wrong MEMOFF fails here, with a message,
+        # rather than in some later check that happens to read the wrong
+        # bytes.
+        probe = bytes(range(16))
+        self.m.set_memory_block(0x5B00, probe)
+        seen = bytes(self.mem[MEMOFF + 0x5B00:MEMOFF + 0x5B10])
+        if seen != probe:
+            raise RuntimeError(f"memory view offset {MEMOFF} is wrong: "
+                               f"wrote {probe.hex()} read {seen.hex()}")
+        self.m.set_memory_block(0x5B00, bytes(16))
         # F3. A 128K pages one of eight 16K banks in at $C000, chosen by
         # the low three bits of a write to $7FFD. The emulator has flat
         # memory, so the banks live here and a write swaps the window's
@@ -286,6 +303,8 @@ def main():
     # is a separate binary now: it needs an interrupt to anchor to and a
     # screen to print on, neither of which exists here, and the two were
     # competing for the same fifteen kilobytes.
+    import importlib.metadata
+    print(f"z80 {importlib.metadata.version('z80')}, memory view offset {MEMOFF}")
     m = Machine("build/zxtest.bin", "build/zxtest.sym")
     m.call("StInit")
     # F1. WinBufP is no longer an address the assembler filled in, so a
@@ -364,8 +383,16 @@ def main():
         failures += dialog_checks()
         failures += loader_checks()
         failures += tape_import_checks()
+        failures += copy_checks()
+        failures += close_status_checks()
+        failures += loader_bounds_checks()
+        failures += arena_checks()
+        failures += clock_race_checks()
+        failures += clock_modal_checks()
+        failures += commander_view_checks()
     else:
-        print("no 48K ROM found, skipping the paint checks")
+        print("no 48K ROM found: SKIPPED every group that boots the desktop")
+        print("  (all of them bar the TEST build counters above)")
 
     if failures:
         print("FAILED:", ", ".join(failures))
@@ -4131,6 +4158,569 @@ def pointer_key_checks(m):
     else:
         print(f"  EXTEND MODE and 5 moves the pointer left, 120 to {shifted}")
     m.keys = {}
+    return failures
+
+
+# ---------------------------------------------------------------------
+#  Regressions from the 1.3.0 data loss review
+#
+#  Each of these was written against the build the finding was made on
+#  and seen to fail there before anything was fixed, so a pass means the
+#  fix did what it says rather than that the check agrees with the code.
+#  They share a few helpers for talking to the storage layer directly,
+#  which the loader and tape checks above each carry a private copy of.
+# ---------------------------------------------------------------------
+REV_BUF, REV_NAME = 0x5B00, 0x5D10      # scratch below the image
+
+
+def rev_name(m, name):
+    for i, ch in enumerate(name):
+        m.poke(REV_NAME + i, ord(ch))
+    m.poke(REV_NAME + len(name), 0)
+    return REV_NAME
+
+
+def rev_write(m, name, blob):
+    """Write a file of any length through StOpen/StWrite/StClose.
+
+    Writes go in 256 byte pieces because the scratch area is small, not
+    because the backends need it: a backend that only takes one write
+    per file would show up here as a short file.
+    """
+    m.m.hl, m.m.b = rev_name(m, name), m.sym("FA_OVERWRITE")
+    m.call("StOpen")
+    if m.m.f & 1:
+        return False
+    h = m.m.a
+    for at in range(0, len(blob), 256):
+        piece = blob[at:at + 256]
+        for i, x in enumerate(piece):
+            m.poke(REV_BUF + i, x)
+        m.m.a, m.m.hl, m.m.bc = h, REV_BUF, len(piece)
+        m.call("StWrite")
+        if m.m.bc != len(piece):
+            break
+    m.m.a = h
+    m.call("StClose")
+    return True
+
+
+def rev_read(m, name, count):
+    """Read a file back through StOpen/StRead/StClose, in 256 byte pieces."""
+    m.m.hl, m.m.b = rev_name(m, name), m.sym("FA_READ")
+    m.call("StOpen")
+    if m.m.f & 1:
+        return None
+    h = m.m.a
+    out = b""
+    while len(out) < count:
+        want = min(256, count - len(out))
+        m.m.a, m.m.hl, m.m.bc = h, REV_BUF, want
+        m.call("StRead")
+        got = m.m.bc
+        if got == 0:
+            break
+        out += bytes(m.peek(REV_BUF + i) for i in range(got))
+    m.m.a = h
+    m.call("StClose")
+    return out
+
+
+def rev_files(m):
+    """The selected device's directory as [(name, length)]."""
+    out = []
+    for i in range(8):
+        m.m.a = i
+        m.call("StDir")
+        if m.m.f & 1:
+            break
+        at, name = m.m.hl, ""
+        while m.peek(at):
+            name += chr(m.peek(at))
+            at += 1
+        out.append((name, m.m.de))
+    return out
+
+
+def rev_key(m, k):
+    m.m.b = m.sym(k) if len(k) > 1 else ord(k)
+    m.call("HdlKey")
+
+
+def rev_screen(m):
+    return bytes(m.peek(0x4000 + i) for i in range(6144))
+
+
+def rev_run_by_hand(m, pc, a=None, steps=2400, quantum=50_000):
+    """Run from `pc` to the sentinel with a bound, for code that may not
+    come back: the ROM tape routines, or a routine with a HALT planted
+    in it. Returns True if it reached the sentinel."""
+    m.poke(SENTINEL, 0x76)
+    m.m.sp = STACK - 2
+    m.poke16(m.m.sp, SENTINEL)
+    m.m.pc = pc
+    if a is not None:
+        m.m.a = a
+    for _ in range(steps):
+        m.m.ticks_to_stop = quantum
+        m.m.run()
+        if m.m.halted:
+            break
+    back = m.m.halted and m.m.pc in (SENTINEL, SENTINEL + 1)
+    m.m.halted = False
+    m.m.ticks_to_stop = 0
+    return back
+
+
+def copy_checks():
+    """F1. A copy between panes carries the whole file.
+
+    CmdCopy reads one 256 byte buffer from the source and writes that
+    much to the destination, so anything longer arrives cut to 256
+    bytes with no word said. On a 128K the panes are the banks and the
+    tape; the tape pane is served from its buffer here, filled the way
+    TapeLoad leaves it, so no ROM is needed. The 8,192 byte case goes
+    the other way, bank to RAM: a RAM file holds 256 bytes at most, so
+    the right answer there is a refusal, not a 256 byte stump.
+    """
+    failures = []
+    print("copies between panes:")
+    m = boot(text="", banked=True)
+    ST_BANK, ST_RAM, ST_TAPE = m.sym("ST_BANK"), m.sym("ST_RAM"), m.sym("ST_TAPE")
+    m.m.a = m.sym("APP_CMD")
+    m.call("WndOpen")
+    if (m.peek(m.sym("CmdBk0")), m.peek(m.sym("CmdBk1"))) != (ST_BANK, ST_TAPE):
+        failures.append("a 128K commander does not pair the banks with the tape")
+        return failures
+
+    def held_on_tape(name, blob):
+        # what TapeLoad leaves behind: the name it found, the length,
+        # the bytes, and nothing pending to save
+        for i, ch in enumerate(name):
+            m.poke(m.sym("TapeFound") + i, ord(ch))
+        m.poke(m.sym("TapeFound") + len(name), 0)
+        m.poke16(m.sym("TapeLen"), len(blob))
+        m.poke16(m.sym("TapePos"), 0)
+        m.poke(m.sym("TapeDirty"), 0)
+        for i, x in enumerate(blob):
+            m.poke(m.sym("TAPEBUF") + i, x)
+
+    rev_key(m, "KEY_RIGHT")                 # the tape pane is the source
+    for n in (255, 256, 257, 511, 512):
+        name = f"T{n}"
+        blob = bytes((i * 7 + n) & 0xFF for i in range(n))
+        held_on_tape(name, blob)
+        m.poke(m.sym("CmdSel1"), 0)
+        rev_key(m, "C")
+        m.m.a = ST_BANK
+        m.call("StSelect")
+        listed = dict(rev_files(m))
+        back = rev_read(m, name, n) if name in listed else None
+        if listed.get(name) != n or back != blob:
+            failures.append(f"a {n} byte copy arrives as {listed.get(name)} bytes")
+            print(f"  {n} bytes from tape to bank: listed as "
+                  f"{listed.get(name)}, read back "
+                  f"{len(back) if back is not None else 'nothing'}")
+        else:
+            print(f"  {n} bytes from tape to bank arrive whole")
+
+    # the other way, into a device that cannot hold it
+    m = boot(text="", banked=True)
+    m.m.a = m.sym("APP_CMD")
+    m.call("WndOpen")
+    big = bytes((i * 13 + 5) & 0xFF for i in range(8192))
+    m.m.a = ST_BANK
+    m.call("StSelect")
+    rev_write(m, "HUGE", big)
+    if rev_files(m) != [("HUGE", 8192)]:
+        failures.append("an 8,192 byte bank file could not be staged")
+        print(f"  staged {rev_files(m)}")
+        return failures
+    m.poke(m.sym("CmdBk1"), ST_RAM)         # bank to RAM, as a 48K's pairing
+    m.poke(m.sym("CmdSel1"), 0)
+    m.poke(m.sym("CmdActive"), 0)
+    m.poke(m.sym("CmdSel0"), 0)
+    rev_key(m, "C")
+    alert = m.peek(m.sym("DgDepth"))
+    m.m.a = ST_RAM
+    m.call("StSelect")
+    listed = dict(rev_files(m))
+    stump = listed.get("HUGE")
+    if stump not in (None, 8192) or (stump is None and not alert):
+        failures.append("an 8,192 byte file copied to RAM leaves a stump "
+                        "and no alert")
+        print(f"  8192 bytes from bank to RAM: RAM holds {stump}, "
+              f"alert depth {alert}")
+    else:
+        print(f"  8192 bytes from bank to RAM: {'refused with an alert' if stump is None else 'arrived whole'}")
+    return failures
+
+
+def close_status_checks():
+    """F2. A close that fails is a save that failed.
+
+    On tape the close is the save, so its carry is the only word the
+    caller gets about whether anything was recorded. NoteSave, SetSave
+    and CmdCopy all drop it. The refusal is injected by pointing the
+    close vector at a two byte stub, scf;ret, planted in scratch RAM;
+    for the commander it has to go into StRegistry, because CmdUse
+    runs StSelect and StSelect copies the vectors back from there.
+    The last case is the real thing: SPACE held through the ROM's
+    SA_BYTES, which TapeRom catches and then reports as success.
+    """
+    failures = []
+    print("a refused close:")
+    STUB = REV_BUF
+
+    def plant(m):
+        m.poke(STUB, 0x37)                  # scf
+        m.poke(STUB + 1, 0xC9)              # ret
+
+    # the notepad
+    m = boot(text="HELLO")
+    plant(m)
+    was = m.peek16(m.sym("StVecClose"))
+    m.poke16(m.sym("StVecClose"), STUB)
+    for i, ch in enumerate("NOTE"):
+        m.poke(m.sym("NoteName") + i, ord(ch))
+    m.poke(m.sym("NoteName") + 4, 0)
+    modified = m.peek(m.sym("NoteModified"))
+    m.call("NoteSave")
+    cy, still = m.m.f & 1, m.peek(m.sym("NoteModified"))
+    m.poke16(m.sym("StVecClose"), was)
+    if not modified:
+        failures.append("typing did not mark the note modified, rewrite this check")
+    elif not cy or not still:
+        failures.append("NoteSave reports a refused close as saved")
+        print(f"  NoteSave: carry {cy}, modified after {still}")
+    else:
+        print("  NoteSave carries the refusal and keeps the note modified")
+
+    # the settings
+    m.poke16(m.sym("StVecClose"), STUB)
+    m.call("SetSave")
+    cy = m.m.f & 1
+    m.poke16(m.sym("StVecClose"), was)
+    if not cy:
+        failures.append("SetSave reports a refused close as saved")
+        print(f"  SetSave: carry {cy}")
+    else:
+        print("  SetSave carries the refusal")
+
+    # the commander, RAM to tape on a 48K, with the tape's close refusing
+    m = boot(text="HELLO")
+    for i, ch in enumerate("NOTE"):
+        m.poke(m.sym("NoteName") + i, ord(ch))
+    m.poke(m.sym("NoteName") + 4, 0)
+    m.call("NoteSave")
+    m.m.a = m.sym("APP_CMD")
+    m.call("WndOpen")
+    plant(m)
+    reg = m.sym("StRegistry")
+    entry = next(reg + k * m.sym("STREGSZ") for k in range(3)
+                 if m.peek(reg + k * m.sym("STREGSZ")) == m.sym("ST_TAPE"))
+    m.poke16(entry + 4, STUB)               # the tape entry's close
+    rev_key(m, "C")
+    alert = m.peek(m.sym("DgDepth"))
+    if not alert:
+        failures.append("a copy whose close is refused is shown as done")
+        print(f"  commander copy: alert depth {alert}")
+    else:
+        print("  a copy whose close is refused raises an alert")
+
+    # SPACE during the real save
+    m = boot(text="")
+    m.m.a = m.sym("ST_TAPE")
+    m.call("StSelect")
+    m.m.hl, m.m.b = rev_name(m, "T"), m.sym("FA_OVERWRITE")
+    m.call("StOpen")
+    h = m.m.a
+    for i in range(16):
+        m.poke(REV_BUF + i, i)
+    m.m.a, m.m.hl, m.m.bc = h, REV_BUF, 16
+    m.call("StWrite")
+    m.poke16(0x5C3D, 0x5BF0)                # ERR_SP, as BASIC would have it
+    m.poke(0x5C3A, 0xFF)
+    m.keys[0x7F] = 0xFE                     # SPACE
+    back = rev_run_by_hand(m, m.sym("StClose"), a=h)
+    cy, brk = m.m.f & 1, m.peek(m.sym("TapeBrk"))
+    m.keys.pop(0x7F)
+    if not back:
+        failures.append("SPACE during a tape save does not come back")
+    elif not brk or not cy:
+        failures.append("SPACE during a tape save is reported as saved")
+        print(f"  tape close under SPACE: TapeBrk {brk}, carry {cy}")
+    else:
+        print("  SPACE during a tape save comes back with carry set")
+    return failures
+
+
+def loader_bounds_checks():
+    """F3. An image shorter than its own descriptor is refused.
+
+    LdrFresh accepts a version 4 image of APPSIZE-2 bytes or more, and
+    LdrDone then copies APPSIZE bytes out of it: for 22 and 23 byte
+    images the last word of the descriptor, the tick vector, comes
+    from whatever follows the image in its heap block, which is the
+    relocation table. The images here are the smallest that are right
+    in every other way: no vectors, one byte of state, an empty title,
+    the counter example's geometry, and both pointers relocated.
+    """
+    failures = []
+    print("loader bounds:")
+
+    def image(n):
+        d = bytearray(24)
+        d[0:2] = (1).to_bytes(2, "little")          # one byte of state,
+        d[2:4] = (21).to_bytes(2, "little")         # a zero inside the image
+        d[10:12] = (20).to_bytes(2, "little")       # title: the zero word at 20
+        d[12:16] = bytes((16, 24, 12, 36))          # X, Y, W, H as counter has
+        img = bytes(d[:n]) + bytes(max(0, n - 24))
+        relocs = (2, 10)
+        return (b"ZXA" + bytes([4]) + n.to_bytes(2, "little")
+                + len(relocs).to_bytes(2, "little") + img
+                + b"".join(r.to_bytes(2, "little") for r in relocs))
+
+    def heap_used(m):
+        at, used = m.sym("HeapBase"), 0
+        while at < m.sym("HEAPEND"):
+            size = m.peek16(at)
+            if m.peek(at + 2):
+                used += size
+            at += size + m.sym("HEAPHDR")
+        return used
+
+    def loaded(m):
+        return sum(m.peek(m.sym("LdrUsed") + i)
+                   for i in range(m.sym("LDRSLOTS")))
+
+    for n in (22, 23, 24):
+        m = boot(text="")
+        size = m.sym("APPSIZE")
+        idle = heap_used(m)
+        rev_write(m, f"IMG{n}", image(n))
+        m.m.hl = rev_name(m, f"IMG{n}")
+        back = rev_run_by_hand(m, m.sym("ApiOpenFile"))
+        a, cy = m.m.a, m.m.f & 1
+        tick = m.peek16(m.sym("AppExt") + m.sym("APP_TICK"))
+        refused = (back and a == 1 and loaded(m) == 0
+                   and heap_used(m) == idle and m.peek(m.sym("DgDepth")))
+        if not back:
+            failures.append(f"a {n} byte version 4 image does not come back")
+            print(f"  {n} bytes: stopped at {m.m.pc:04X}")
+        elif n < size and not refused:
+            failures.append(f"a {n} byte version 4 image is accepted "
+                            f"though the descriptor is {size} bytes")
+            print(f"  {n} bytes: A {a}, carry {cy}, loaded {loaded(m)}, "
+                  f"tick vector {tick:04X} read from past the image")
+        elif n < size:
+            print(f"  a {n} byte image is refused")
+        else:
+            print(f"  a {n} byte image, the smallest whole descriptor: "
+                  f"A {a}, carry {cy}, loaded {loaded(m)}, tick {tick:04X}")
+    return failures
+
+
+def arena_checks():
+    """F4. Four full surfaces fit the arena.
+
+    SUARENA is 4 * 16 * 96 bytes of pixels. Each surface also writes a
+    four byte header, so four maximum surfaces run 16 bytes past the
+    arena into HeapBase, which is the heap's first block header.
+    """
+    failures = []
+    print("save under arena:")
+    m = boot(text="")
+    base = m.sym("HeapBase")
+    before = bytes(m.peek(base + i) for i in range(16))
+    for _ in range(4):
+        for name, val in (("SuX", 0), ("SuY", 0), ("SuW", 16), ("SuH", 96)):
+            m.poke(m.sym(name), val)
+        m.call("SaveUnder")
+    depth = m.peek(m.sym("SuDepth"))
+    used = (m.peek16(m.sym("SuTop")) - m.sym("SuArena")) & 0xFFFF
+    after = bytes(m.peek(base + i) for i in range(16))
+    for _ in range(depth):
+        m.call("RestoreUnder")
+    if depth != 4:
+        failures.append("four full surfaces could not be pushed")
+        print(f"  depth {depth}")
+    elif used > m.sym("SUARENA") or after != before:
+        failures.append(f"four full surfaces take {used} bytes of a "
+                        f"{m.sym('SUARENA')} byte arena")
+        print(f"  arena used {used} of {m.sym('SUARENA')}, heap header "
+              f"{'overwritten' if after != before else 'intact'}")
+    else:
+        print(f"  four full surfaces take {used} of {m.sym('SUARENA')} "
+              f"bytes and the heap header is intact")
+    return failures
+
+
+def clock_race_checks():
+    """F5. An interrupt between ClkTick's two reads of IrqCnt.
+
+    ClkTick reads IrqCnt to find the delta and reads it again to
+    record where it got to. An interrupt between the two advances the
+    counter by one that is recorded as seen and never counted. There
+    is no interrupt source here, so the gap is made by planting a
+    HALT on the second read, advancing the counter when it stops, and
+    letting it run on.
+    """
+    failures = []
+    print("clock counter read:")
+    m = boot(text="")
+    m.call("ClkInit")
+    irq = m.sym("IrqCnt")
+    ld_hl_irq = bytes([0x2A, irq & 0xFF, irq >> 8])
+    at = m.sym("ClkTick")
+    reads = [at + off for off in range(48)
+             if bytes(m.peek(at + off + i) for i in range(3)) == ld_hl_irq]
+    if len(reads) < 2:
+        print(f"  ClkTick reads IrqCnt {len(reads)} time(s): the window is gone")
+        return failures
+    second = reads[1]
+    m.poke16(irq, (m.peek16(m.sym("ClkLast")) + 50) & 0xFFFF)
+    last0 = m.peek16(m.sym("ClkLast"))
+    m.poke(second, 0x76)
+    m.poke(SENTINEL, 0x76)
+    m.m.sp = STACK - 2
+    m.poke16(m.m.sp, SENTINEL)
+    m.m.pc = at
+    ticks = 0
+    while not m.m.halted and ticks < 1_000_000:
+        ticks += m.m.run()
+    stopped = m.m.halted and m.m.pc in (second, second + 1)
+    m.m.halted = False
+    m.poke(second, 0x2A)
+    if not stopped:
+        failures.append("ClkTick could not be stopped between its reads")
+        print(f"  halted {m.m.halted} at {m.m.pc:04X}")
+        return failures
+    m.poke16(irq, (m.peek16(irq) + 1) & 0xFFFF)     # the interrupt lands
+    m.m.pc = second
+    ticks = 0
+    while not m.m.halted and ticks < 1_000_000:
+        ticks += m.m.run()
+    back = m.m.halted and m.m.pc in (SENTINEL, SENTINEL + 1)
+    m.m.halted = False
+    moved = (m.peek16(m.sym("ClkLast")) - last0) & 0xFFFF
+    counted = m.peek16(m.sym("ClkDelta"))
+    if not back:
+        failures.append("ClkTick did not return after the planted stop")
+    elif moved != counted:
+        failures.append(f"an interrupt between the two reads loses a tick: "
+                        f"ClkLast moved {moved}, {counted} counted")
+        print(f"  ClkLast moved {moved}, ClkDelta {counted}")
+    else:
+        print(f"  the counter moved {moved} and {counted} were counted")
+    return failures
+
+
+def clock_modal_checks():
+    """F6. The clock does not paint while something modal is up.
+
+    AppTick holds back while Dragging, Resizing, DlgUp or MenuOpen is
+    set and ClkService does not, so a minute turning under a dialogue
+    puts the face through it. The repaint has to wait, not be dropped:
+    ClkDirty stays set so the face is right once the dialogue goes.
+    """
+    failures = []
+    print("clock under a modal:")
+    m = boot(text="")
+    m.call("ClkInit")
+    m.m.a = m.sym("APP_CLOCK")
+    m.call("WndOpen")
+    face_row = m.peek(m.sym("WinY")) + m.sym("WinCapH") + m.sym("CLKROW")
+    face_cols = range(m.peek(m.sym("WinX")) + 1,
+                      m.peek(m.sym("WinX")) + 1 + m.sym("CLKW"))
+    for label, opener, a, closer in (("a dialogue", "DlgOpen", None, "DlgClose"),
+                                     ("a menu", "MenuOpenDrop", 1, "MenuClose")):
+        if a is not None:
+            m.m.a = a
+        m.call(opener)
+        x, y, w, h = (m.peek(m.sym(n)) for n in ("SuX", "SuY", "SuW", "SuH"))
+        covers = (y <= face_row < y + h
+                  and any(x <= c < x + w for c in face_cols))
+        before = rev_screen(m)
+        m.poke(m.sym("ClkDirty"), 1)
+        m.call("ClkService")
+        after = rev_screen(m)
+        dirty = m.peek(m.sym("ClkDirty"))
+        m.call(closer)
+        changed = sum(1 for i in range(6144) if before[i] != after[i])
+        where = "which covers the face" if covers else "which does not reach the face"
+        if changed or not dirty:
+            failures.append(f"the clock paints under {label}")
+            print(f"  under {label}, {where}: {changed} screen bytes "
+                  f"changed, ClkDirty {dirty} after")
+        else:
+            print(f"  under {label}, {where}: nothing painted and the "
+                  f"repaint still pending")
+    return failures
+
+
+def commander_view_checks():
+    """F7. The selection stays on the list after a shrink.
+
+    CmdKey bounds the selection by the file count and never by the
+    rows the window shows, and the pane draws only those rows, so a
+    selection below the last row is invisible and ENTER opens a file
+    that is not on the screen. A resize to two rows with the fourth
+    file selected has to show the fourth file, inverted.
+    """
+    failures = []
+    print("commander after a shrink:")
+    m = boot(text="HELLO")
+    for name in ("NOTE", "DRAFT", "LETTER", "MEMO"):
+        for i, ch in enumerate(name):
+            m.poke(m.sym("NoteName") + i, ord(ch))
+        m.poke(m.sym("NoteName") + len(name), 0)
+        m.call("NoteSave")
+    m.m.a = m.sym("APP_CMD")
+    m.call("WndOpen")
+    for _ in range(3):
+        rev_key(m, "KEY_DOWN")
+    if m.peek(m.sym("CmdSel0")) != 3:
+        failures.append("down did not reach the fourth file")
+        return failures
+
+    plain = {m.font_glyph(chr(c)): chr(c) for c in range(32, 128)}
+    inv = {m.font_glyph(chr(c), invert=True): chr(c) for c in range(32, 128)}
+
+    def rows():
+        x = m.peek(m.sym("WinX")) + 1
+        y = m.peek(m.sym("WinY")) + m.sym("CMDLISTY")
+        out = []
+        for r in range(m.peek(m.sym("CmdN"))):
+            text, inverted = "", False
+            for i in range(8):
+                g = m.glyph_at(x + i, y + r * 8)
+                if g in inv:
+                    inverted = True
+                text += inv.get(g, plain.get(g, " "))
+            out.append((text.strip(), inverted))
+        return out
+
+    # the resize gesture's last step, with the outline it removes never
+    # drawn: the window shrinks to two list rows
+    m.poke(m.sym("RszOldW"), m.peek(m.sym("WinW")))
+    m.poke(m.sym("RszOldH"), m.peek(m.sym("WinH")))
+    m.poke(m.sym("RszW"), m.peek(m.sym("WinW")))
+    want_h = m.sym("CMDLISTY") + 19
+    m.poke(m.sym("RszH"), want_h)
+    m.poke(m.sym("Resizing"), 1)
+    m.call("RszEnd")
+    shown = rows()
+    sel = m.peek(m.sym("CmdSel0"))
+    if m.peek(m.sym("WinH")) != want_h:
+        failures.append("the shrink did not take")
+        print(f"  WinH {m.peek(m.sym('WinH'))}, wanted {want_h}")
+    elif [t for t, i in shown if i] != ["MEMO"]:
+        failures.append("after a shrink the selection is off the list")
+        print(f"  {len(shown)} rows shown {shown}, selection is file {sel}")
+    else:
+        print(f"  two rows after the shrink, {shown}, and the selected "
+              f"file is the inverted one")
     return failures
 
 
