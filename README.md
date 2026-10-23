@@ -622,9 +622,16 @@ most, before giving up.
 The last file read stays in the tape buffer, and the tape pane lists
 it. ENTER on it there runs it straight from the buffer without touching
 the tape. That matters on a 48K, where a RAM device file is 256 bytes:
-an app bigger than that can't be imported, so A refuses it whole and
-says so, but it is still in the buffer and still runs from the tape
-pane.
+an app bigger than that can't be imported, so R and A refuse it whole,
+say `DOES NOT FIT`, and leave nothing behind, but it is still in the
+buffer and still runs from the tape pane.
+
+C copies the selected file to the other pane's device, in 256 byte
+pieces until the file ends, and D deletes it. A copy that doesn't fit
+is refused the same way as an import: nothing is left in the other
+pane, because half a file is worse than none. A copy to tape is saved
+when the last piece is written, and if SPACE stops the save the copy
+says `NOT SAVED` rather than pretending the tape has it.
 
 **What fits where.**
 
@@ -825,7 +832,11 @@ model carried across. It isn't published yet.
 until it's raised, because window buffers are grabbed from the screen
 rather than composed into. An application can't refuse to close,
 because there's no teardown vector that can say no, and adding one
-before anything needed it would have been guessing. Every notepad is
+before anything needed it would have been guessing. A save that fails
+is the one exception: the notepad asks before it loses work, and if the
+save it was told to make is refused or stopped at the tape, the window
+stays open and says `COULD NOT SAVE` rather than closing over work
+that exists only in RAM. Every notepad is
 titled from its application rather than its document. The notepad has
 no selection, clipboard, undo or word wrap. Mouse presence detection
 is still a heuristic, and I can't test it because I don't have a
@@ -907,6 +918,11 @@ were not.
 
 To [Inkbox](https://github.com/InkboxSoftware)'s NES-OS, which is the
 proof that this kind of thing is worth doing.
+
+To the review that read 1.3.0 for data loss and found seven ways it
+could lose a file, and to the second opinion on it that insisted each
+one be a failing test before it was a fix. 1.3.1 is those seven fixes,
+and the tests are in `zxtest.py` to stay.
 
 And to a machine that was never meant to do any of this, and does.
 
